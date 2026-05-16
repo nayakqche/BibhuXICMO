@@ -1,0 +1,140 @@
+"use client";
+
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, Globe, Loader2, Pencil, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/frontend/components/ui/button";
+import { Input } from "@/frontend/components/ui/input";
+import { clientNormalizeUrl } from "@/shared/normalize-url";
+import { updateWorkspaceAction } from "@/app/(app)/settings/actions";
+
+/**
+ * Inline website-URL entry form embedded in the Company panel.
+ *
+ * Two modes:
+ *   - When the workspace has no websiteUrl yet → renders a permanent input
+ *     so the dashboard tells the user exactly what to do first.
+ *   - When a URL is already set → renders a small "Change site" pill button
+ *     that toggles the input on demand.
+ *
+ * Submitting calls the existing updateWorkspaceAction (which clears all
+ * caches on URL change), then triggers a router.refresh() so every panel
+ * — strategy, social pills, PageSpeed, Ahrefs — re-runs against the new
+ * site without the user having to navigate anywhere.
+ */
+export function SiteQuickAdd({
+  workspaceName,
+  currentUrl,
+}: {
+  workspaceName: string;
+  currentUrl: string | null;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(!currentUrl);
+  const [value, setValue] = useState(currentUrl ?? "");
+  const [isSaving, startSaving] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => inputRef.current?.focus(), 30);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (isSaving) return;
+    const target = clientNormalizeUrl(value);
+    if (!target) {
+      toast.error("Enter a valid domain", {
+        description: "e.g. yoursite.com or https://yoursite.com",
+      });
+      return;
+    }
+    startSaving(async () => {
+      const fd = new FormData();
+      // The settings action expects all four fields. We preserve the
+      // existing workspace name and clear industry/icp so the strategy
+      // re-runs cleanly for the new site.
+      fd.set("name", workspaceName);
+      fd.set("websiteUrl", target);
+      fd.set("industry", "");
+      fd.set("icp", "");
+      const res = await updateWorkspaceAction(null, fd);
+      if (res && "ok" in res && res.ok) {
+        toast.success("Site saved — running fresh audit", {
+          description: "Pulling Ahrefs · Lighthouse · Claude strategy. Takes 30-60s.",
+        });
+        setOpen(false);
+        // Hard refresh so the streamed slow data re-runs from scratch.
+        router.refresh();
+      } else if (res && "error" in res) {
+        toast.error(res.error);
+      }
+    });
+  }
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        className="justify-start gap-2"
+      >
+        <Pencil className="h-3.5 w-3.5" aria-hidden />
+        Change site
+      </Button>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <label className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Globe className="h-3 w-3" /> Website URL
+      </label>
+      <div className="flex items-stretch gap-1.5">
+        <Input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="yoursite.com"
+          autoComplete="url"
+          spellCheck={false}
+          disabled={isSaving}
+          className="h-9 text-sm"
+        />
+        <Button type="submit" size="sm" disabled={isSaving || !value.trim()}>
+          {isSaving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ArrowRight className="h-3.5 w-3.5" />
+          )}
+        </Button>
+        {currentUrl ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setValue(currentUrl);
+              setOpen(false);
+            }}
+            disabled={isSaving}
+            title="Cancel"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+      </div>
+      <p className="text-[10px] leading-tight text-muted-foreground">
+        We&rsquo;ll scrape the homepage, run Lighthouse, fetch Ahrefs
+        (DR, backlinks, traffic), and ask Claude to generate strategy +
+        social handles. First audit takes ~30-60s.
+      </p>
+    </form>
+  );
+}
