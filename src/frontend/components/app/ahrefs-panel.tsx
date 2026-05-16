@@ -228,13 +228,83 @@ function SnapshotView({ snapshot }: { snapshot: Snapshot }) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="grid gap-4 md:grid-cols-2">
+        {snapshot.topCountries.length > 0 ? (
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">Top traffic countries</h3>
+            <div className="overflow-hidden rounded-md border">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Country</th>
+                    <th className="px-2 py-2 text-right">Share</th>
+                    <th className="px-2 py-2 text-right">Traffic</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {snapshot.topCountries.slice(0, 6).map((c) => (
+                    <tr key={c.country} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium uppercase">{c.country}</td>
+                      <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                        {c.share != null ? `${(c.share * (c.share > 1 ? 1 : 100)).toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                        {c.traffic != null ? formatCompact(c.traffic) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {snapshot.topPages.length > 0 ? (
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">Top traffic pages</h3>
+            <div className="overflow-hidden rounded-md border">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left">URL</th>
+                    <th className="px-2 py-2 text-right">Traffic</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {snapshot.topPages.slice(0, 6).map((p, i) => (
+                    <tr key={`${p.url}-${i}`} className="hover:bg-muted/30">
+                      <td className="max-w-[18ch] px-3 py-2">
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="block truncate font-mono text-[11px] text-foreground underline-offset-2 hover:underline"
+                          title={p.url}
+                        >
+                          {p.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                        </a>
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                        {p.traffic != null ? formatCompact(p.traffic) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <Link2 className="h-3 w-3" />
         <span>Source: Apify Ahrefs actor</span>
         <span>·</span>
         <span>{new Date(snapshot.fetchedAt).toLocaleString()}</span>
         <span>·</span>
         <span className="font-mono">{snapshot.domain}</span>
+        <span>·</span>
+        <span>mode: {snapshot.mode}</span>
       </div>
     </div>
   );

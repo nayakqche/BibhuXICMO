@@ -47,7 +47,7 @@ const PLATFORMS: Array<{
 }> = [
   {
     key: "twitter",
-    pattern: /https?:\/\/(?:www\.|mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9_]{1,30})(?:[/?#]|$)/gi,
+    pattern: /https?:\/\/(?:www\.|mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9_]{1,30})(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m =
         /https?:\/\/(?:www\.|mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9_]{1,30})/i.exec(
@@ -61,7 +61,7 @@ const PLATFORMS: Array<{
   },
   {
     key: "instagram",
-    pattern: /https?:\/\/(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{1,40})(?:[/?#]|$)/gi,
+    pattern: /https?:\/\/(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{1,40})(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m = /https?:\/\/(?:www\.)?instagram\.com\/([A-Za-z0-9_.]{1,40})/i.exec(raw);
       if (!m) return null;
@@ -75,7 +75,7 @@ const PLATFORMS: Array<{
     // Matches /company/foo and /school/foo (we exclude personal /in/ profiles
     // because the brand handle on LinkedIn is the company page).
     pattern:
-      /https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/(?:company|school|showcase)\/([A-Za-z0-9\-._%]+)(?:[/?#]|$)/gi,
+      /https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/(?:company|school|showcase)\/([A-Za-z0-9\-._%]+)(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m =
         /https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/(?:company|school|showcase)\/([A-Za-z0-9\-._%]+)/i.exec(
@@ -88,7 +88,7 @@ const PLATFORMS: Array<{
   {
     key: "facebook",
     pattern:
-      /https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\/(?!sharer|share|tr|tr\.php|plugins)([A-Za-z0-9.\-]{1,60})(?:[/?#]|$)/gi,
+      /https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\/(?!sharer|share|tr|tr\.php|plugins)([A-Za-z0-9.\-]{1,60})(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m =
         /https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\/(?!sharer|share|tr)([A-Za-z0-9.\-]{1,60})/i.exec(
@@ -114,7 +114,7 @@ const PLATFORMS: Array<{
   },
   {
     key: "github",
-    pattern: /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9\-]{1,39})(?:[/?#]|$)/gi,
+    pattern: /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9\-]{1,39})(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m = /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9\-]{1,39})/i.exec(raw);
       if (!m) return null;
@@ -125,7 +125,7 @@ const PLATFORMS: Array<{
   },
   {
     key: "tiktok",
-    pattern: /https?:\/\/(?:www\.)?tiktok\.com\/@([A-Za-z0-9_.]{2,40})(?:[/?#]|$)/gi,
+    pattern: /https?:\/\/(?:www\.)?tiktok\.com\/@([A-Za-z0-9_.]{2,40})(?:[/?#\s]|$)/gi,
     normalize: (raw) => {
       const m = /https?:\/\/(?:www\.)?tiktok\.com\/@([A-Za-z0-9_.]{2,40})/i.exec(raw);
       if (!m) return null;
@@ -230,15 +230,18 @@ URL: ${snapshot.url}
 Brand context from the page:
 ${brandHints}
 
-For each platform below, the regex pre-scan found these URL/handle candidates (in order of how often they appeared on the homepage):
+For each platform below, the regex pre-scan found these candidates (in order of how often they appeared on the homepage):
 
 ${candidateSummary}
 
-Return the single most-likely **official brand account** for each platform.
+Return one canonical handle per platform.
 
 Rules:
-- Use the EXACT string from the candidate list when picking — do not invent or rewrite handles.
-- If none of the candidates look like the company's own account (e.g. they are share-intent URLs, employee personal profiles, partner brands, or unrelated), return null for that platform.
+- Prefer the candidate that appears MULTIPLE times on the homepage — those are the footer/header social icons and are almost always the brand's own accounts.
+- A handle whose slug contains or closely matches the brand name (e.g. brand "Anthropic" → "@AnthropicAI", "linkedin.com/company/anthropicresearch") IS the official account. Don't reject these for being non-exact.
+- Use the EXACT string from the candidate list — do not invent or rewrite handles.
+- Return null only when the candidate is clearly NOT the brand's account (e.g. unrelated partner, share-intent URL like "share.html", random employee personal profile).
+- When there is exactly one candidate for a platform AND it appears at least once on the page, return it.
 - Twitter/Instagram/TikTok handles should be like "@handle".
 - LinkedIn should be like "linkedin.com/company/slug".
 - YouTube should be like "@handle" or "youtube.com/c/slug" or "youtube.com/channel/UCxxxx".
@@ -247,7 +250,7 @@ Rules:
 
   try {
     const { object } = await generateObject({
-      model: getModel("claude-haiku-4-5"),
+      model: getModel("claude-sonnet-4-6"),
       schema: HANDLES_SCHEMA,
       prompt,
       // Cheap + bounded — this is a tiny structured-output task.
