@@ -27,6 +27,7 @@ import {
   type CmoLlmAnalysis,
 } from "@/backend/pipelines/cmo-llm-analysis.pipeline";
 import { strategyPipeline } from "@/backend/pipelines/strategy.pipeline";
+import { extractSocialHandles } from "@/backend/social-extractor";
 
 export type { CmoLlmAnalysis };
 
@@ -356,6 +357,55 @@ export async function loadCmoSlowData(args: {
       }
     } catch (err) {
       console.error("[cmo] lazy strategy regen failed:", err);
+    }
+  }
+
+  // Auto-detect social handles when websiteUrl is set and we haven't found them yet.
+  // Runs once per workspace per site (results cached on voiceProfile.socialHandles).
+  // The latest fresh voice wins for the in-memory return, but we always persist
+  // the merged result so the next page load already has handles available.
+  const currentVoice = freshVoice ?? voice ?? null;
+  const hasHandles =
+    currentVoice?.socialHandles &&
+    Object.values(currentVoice.socialHandles).some(
+      (v) => typeof v === "string" && v.trim().length > 0
+    );
+  if (websiteUrl && !hasHandles) {
+    try {
+      const detected = await extractSocialHandles(websiteUrl);
+      if (Object.keys(detected.handles).length > 0) {
+        const mergedVoice: CmoVoiceProfile = {
+          ...(currentVoice ?? {}),
+          socialHandles: {
+            ...(currentVoice?.socialHandles ?? {}),
+            ...detected.handles,
+          },
+        };
+        try {
+          await prisma.workspace.update({
+            where: { id: args.workspaceId },
+            data: {
+              voiceProfile: JSON.parse(
+                JSON.stringify(mergedVoice)
+              ) as Prisma.InputJsonValue,
+            },
+          });
+        } catch (err) {
+          console.error("[cmo] failed to persist auto-detected social handles:", err);
+        }
+        if (freshVoice) {
+          freshVoice = mergedVoice;
+        } else {
+          // Reflect into the in-memory voice variable so this render shows them.
+          if (voice) {
+            voice.socialHandles = mergedVoice.socialHandles;
+          } else {
+            freshVoice = mergedVoice;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[cmo] social-handle auto-detect failed:", err);
     }
   }
 
