@@ -257,9 +257,16 @@ function HealthTab({ data }: { data: CmoData }) {
           <ScoreGrid label="Desktop" scores={data.pageSpeed.desktop} />
           {!pageSpeedOk ? (
             <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-              PageSpeed could not run for this URL right now. Add{" "}
-              <code className="rounded bg-muted px-1">PAGESPEED_API_KEY</code> for
-              higher quotas.
+              {data.pageSpeed?.error
+                ? data.pageSpeed.error
+                : (
+                  <>
+                    Lighthouse didn&rsquo;t return scores for this URL. Try
+                    a faster or less-protected site, or set{" "}
+                    <code className="rounded bg-muted px-1">PAGESPEED_API_KEY</code>{" "}
+                    for higher quotas.
+                  </>
+                )}
             </p>
           ) : null}
         </div>

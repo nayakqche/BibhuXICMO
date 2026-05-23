@@ -49,6 +49,9 @@ const SYSTEM_PROMPT = `You are a senior marketing strategist. Given a single web
 
 Hard requirements:
 - competitors: ALWAYS list 3-6 real, well-known direct competitors that target the same ICP. Never leave this empty. If the niche is unclear, use the closest analog category leaders.
+  IMPORTANT FORMAT — each competitor MUST be written as "BrandName (canonical-domain.com)".
+  Examples: "Jasper AI (jasper.ai)", "HubSpot Marketing Hub (hubspot.com)", "Surfer SEO (surferseo.com)", "Notion (notion.so)".
+  Do NOT include http:// or www. — just the bare brand domain in parentheses. This lets the UI render real logos.
 - topicClusters: at least 1 cluster with 3+ keywords.
 - valueProps: 3-5 concrete prop sentences (no fluff).`;
 
