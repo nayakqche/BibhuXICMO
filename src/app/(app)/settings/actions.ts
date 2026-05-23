@@ -162,3 +162,37 @@ export async function saveSocialHandlesAction(
   revalidatePath("/agent/cmo");
   return { ok: true };
 }
+
+/**
+ * Force a fresh audit on the current workspace's URL: clears the cached
+ * voiceProfile, cmoLlmSnapshot, and ahrefsSnapshot so the next dashboard
+ * load re-runs Claude strategy + Apify Ahrefs + PageSpeed from scratch.
+ *
+ * Used by SiteQuickAdd so 'Change site' followed by the same URL still
+ * triggers a full re-audit (otherwise updateWorkspaceAction notices the
+ * URL didn't change and skips the cache reset).
+ */
+export async function forceReauditAction(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  const { workspace } = await requireWorkspace({ skipOnboardingCheck: true });
+  try {
+    await prisma.workspace.update({
+      where: { id: workspace.id },
+      data: {
+        voiceProfile: Prisma.DbNull,
+        cmoLlmSnapshot: Prisma.DbNull,
+        ahrefsSnapshot: Prisma.DbNull,
+        ahrefsSnapshotAt: null,
+      },
+    });
+    revalidatePath("/agent/cmo");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not reset workspace caches.",
+    };
+  }
+}

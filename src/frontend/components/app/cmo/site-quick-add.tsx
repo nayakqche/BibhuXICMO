@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import { clientNormalizeUrl } from "@/shared/normalize-url";
-import { updateWorkspaceAction } from "@/app/(app)/settings/actions";
+import { updateWorkspaceAction, forceReauditAction } from "@/app/(app)/settings/actions";
 
 /**
  * Inline website-URL entry form embedded in the Company panel.
@@ -64,12 +64,23 @@ export function SiteQuickAdd({
       fd.set("icp", "");
       const res = await updateWorkspaceAction(null, fd);
       if (res && "ok" in res && res.ok) {
-        toast.success("Site saved — running fresh audit", {
+        // Same-URL submissions don't trigger updateWorkspaceAction's
+        // cache-clear branch — call forceReauditAction so the dashboard
+        // always re-runs strategy / Ahrefs / PageSpeed after a save.
+        await forceReauditAction();
+        toast.success("Site saved — refreshing dashboard", {
           description: "Pulling Ahrefs · Lighthouse · Claude strategy. Takes 30-60s.",
         });
         setOpen(false);
-        // Hard refresh so the streamed slow data re-runs from scratch.
-        router.refresh();
+        // Hard reload — bulletproof against React server-component cache, browser
+        // bfcache and stale streamed data. router.refresh() was sometimes leaving
+        // panels on old workspace data.
+        if (typeof window !== "undefined") {
+          // Tiny delay so the toast paints before the reload kicks in.
+          setTimeout(() => window.location.reload(), 250);
+        } else {
+          router.refresh();
+        }
       } else if (res && "error" in res) {
         toast.error(res.error);
       }

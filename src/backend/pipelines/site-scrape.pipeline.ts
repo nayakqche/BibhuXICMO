@@ -28,8 +28,23 @@ export class SiteScrapePipeline {
   constructor(private readonly fetchTimeoutMs = FETCH_TIMEOUT_MS) {}
 
   private get userAgent(): string {
-    const origin = env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-    return `Mozilla/5.0 (compatible; ${CRAWLER_PRODUCT_TOKEN}; +${origin}/bot)`;
+    // We deliberately impersonate a real desktop Chrome. The previous
+    // 'xicmo-bot/0.1' identifier was being silently downgraded to bare
+    // landing pages by Amazon, Google, LinkedIn, etc. — which is exactly
+    // why competitor analysis and social-handle detection were unusable
+    // for those domains. Public, paid scrapers (Apify, ScrapingBee, etc.)
+    // all default to a real-browser UA for the same reason.
+    return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+  }
+
+  private get acceptHeaders(): Record<string, string> {
+    return {
+      "User-Agent": this.userAgent,
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+    };
   }
 
   normalizeUrl(input: string): string {
@@ -51,7 +66,7 @@ export class SiteScrapePipeline {
 
     try {
       const res = await fetch(normalized, {
-        headers: { "User-Agent": this.userAgent, Accept: "text/html,application/xhtml+xml" },
+        headers: this.acceptHeaders,
         signal: ctrl.signal,
         redirect: "follow",
       });
