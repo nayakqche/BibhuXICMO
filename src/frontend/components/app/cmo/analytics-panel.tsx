@@ -920,22 +920,12 @@ function AhrefsTrafficCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <AhrefsStat
           label="Organic traffic / mo"
           value={snapshot.organicTraffic}
           formatter={formatCompactNum}
           accent
-        />
-        <AhrefsStat
-          label="Last month"
-          value={snapshot.organicTrafficLastMonth}
-          formatter={formatCompactNum}
-        />
-        <AhrefsStat
-          label="Traffic value"
-          value={snapshot.organicTrafficValue}
-          formatter={(n) => `$${formatCompactNum(n)}`}
         />
         <AhrefsStat
           label="Tracked keywords"
@@ -986,19 +976,32 @@ function AhrefsTrafficCard({
             <Globe className="h-3 w-3" /> Traffic by country
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {snapshot.topCountries.slice(0, 8).map((c) => (
-              <span
-                key={c.country}
-                className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px]"
-              >
-                <span className="font-semibold uppercase">{c.country}</span>
-                {c.share != null ? (
-                  <span className="font-mono text-muted-foreground">
-                    {formatPct(c.share)}
-                  </span>
-                ) : null}
-              </span>
-            ))}
+            {snapshot.topCountries.slice(0, 8).map((c) => {
+              // Apify actor doesn't return per-country traffic numbers in this view,
+              // only share — so we compute estimated traffic = total * share/100.
+              const estTraffic =
+                c.traffic != null
+                  ? c.traffic
+                  : c.share != null && snapshot.organicTraffic != null
+                    ? Math.round(
+                        snapshot.organicTraffic *
+                          (c.share > 1 ? c.share / 100 : c.share)
+                      )
+                    : null;
+              return (
+                <span
+                  key={c.country}
+                  className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px]"
+                >
+                  <span className="font-semibold uppercase">{c.country}</span>
+                  {estTraffic != null ? (
+                    <span className="font-mono text-muted-foreground">
+                      {formatCompactNum(estTraffic)}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -1047,7 +1050,7 @@ function AhrefsBacklinksCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md border bg-card/50 p-3">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
             Domain Rating
@@ -1144,8 +1147,3 @@ function formatCompactNum(n: number): string {
   return n.toLocaleString();
 }
 
-function formatPct(share: number): string {
-  // Some Ahrefs fields come as 0.41 (decimal), some as 41 (percent).
-  const v = share > 1 ? share : share * 100;
-  return `${v.toFixed(1)}%`;
-}
