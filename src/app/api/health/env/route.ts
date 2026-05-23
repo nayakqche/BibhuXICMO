@@ -71,6 +71,11 @@ export async function GET(req: Request) {
     RESEND_API_KEY: probe("RESEND_API_KEY"),
     REDIS_URL: probe("REDIS_URL"),
 
+    // Reddit Sales Agent backend URL (set on xicmo-web after the
+    // reddit-agent service is deployed). NEXT_PUBLIC_ so the browser
+    // gets it via env injection at build / render time.
+    NEXT_PUBLIC_REDDIT_AGENT_URL: probe("NEXT_PUBLIC_REDDIT_AGENT_URL"),
+
     ts: new Date().toISOString(),
   };
 
