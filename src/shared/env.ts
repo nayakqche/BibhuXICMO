@@ -56,6 +56,13 @@ const envSchema = z.object({
   /** Apify token used for the Ahrefs scraper actor + any other Apify integrations. */
   APIFY_TOKEN: z.string().optional(),
   /**
+   * Optional dedicated Apify token for the X (Twitter) scraper. If set, the
+   * X agent uses this token instead of APIFY_TOKEN — useful when you want
+   * Ahrefs and X to bill against separate Apify accounts / credit pools.
+   * Falls back to APIFY_TOKEN when unset.
+   */
+  APIFY_X_TOKEN: z.string().optional(),
+  /**
    * Apify actor id that returns Ahrefs-style site data (domain rating,
    * backlinks, organic traffic, top keywords). Defaults to the
    * `radeance/ahrefs-scraper` actor; override to swap providers.

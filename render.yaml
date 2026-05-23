@@ -83,6 +83,11 @@ services:
       # ----- Apify (Ahrefs scraper + X tweet search) -----
       - key: APIFY_TOKEN
         sync: false
+      # Optional: dedicated Apify token for the X agent. If unset, the X
+      # agent falls back to APIFY_TOKEN. Useful when you want Ahrefs and
+      # X tweet scraping to bill against separate Apify accounts.
+      - key: APIFY_X_TOKEN
+        sync: false
       - key: APIFY_AHREFS_ACTOR_ID
         value: radeance~ahrefs-scraper
       - key: APIFY_X_ACTOR_ID
