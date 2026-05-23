@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Bot,
-  Code2,
   CreditCard,
   FileText,
   Hash,
   Home,
+  Instagram,
   Layers,
+  Link2,
   Linkedin,
   MessageCircle,
   MessageSquare,
@@ -20,6 +21,7 @@ import {
   Settings,
   Sparkles,
   TrendingUp,
+  Youtube,
 } from "lucide-react";
 import { X } from "lucide-react";
 import { cn } from "@/shared/utils";
@@ -46,7 +48,10 @@ const AGENTS = [
   { href: "/agents/hn", label: "Hacker News", icon: Newspaper },
   { href: "/agents/x", label: "X / Twitter", icon: Hash },
   { href: "/agents/linkedin", label: "LinkedIn", icon: Linkedin },
-  { href: "/agents/coding", label: "Coding", icon: Code2 },
+  // Influencer + backlink modules — UI stubs for now, backend coming next.
+  { href: "/agents/youtube-creators", label: "YT Creators", icon: Youtube },
+  { href: "/agents/instagram-influencers", label: "Insta Influencers", icon: Instagram },
+  { href: "/agents/backlink-marketplace", label: "Backlink Marketplace", icon: Link2 },
 ];
 
 const DATA = [
