@@ -5,6 +5,7 @@ import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
+import { env } from "@/shared/env";
 import { ContentWriterForm } from "./form";
 
 export const metadata = { title: "Content Writer" };
@@ -41,7 +42,7 @@ export default async function ContentAgentPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ContentWriterForm />
+            <ContentWriterForm geminiAvailable={!!env.GOOGLE_GEMINI_API_KEY} />
           </CardContent>
         </Card>
 

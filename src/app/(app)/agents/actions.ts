@@ -67,3 +67,69 @@ export async function resolveActionItem(actionId: string, status: "DONE" | "DISM
   revalidatePath("/actions");
   return { ok: true as const };
 }
+
+import { generateBulkBlog, type BlogType } from "@/backend/agents/content-bulk";
+import type { CmoVoiceProfile } from "@/backend/agents/cmo-data";
+
+export type BulkContentResult =
+  | { ok: true; created: Array<{ id: string; title: string; keyword: string }> }
+  | { ok: false; error: string; partial?: Array<{ id: string; title: string; keyword: string }> };
+
+/**
+ * Generate one blog draft per keyword. Keywords are processed sequentially
+ * (so the user can see drafts appear one at a time after each completes)
+ * and per-keyword failures are isolated — the rest of the batch keeps
+ * going.
+ */
+export async function runContentBulkAction(args: {
+  keywords: string[];
+  blogType: BlogType;
+  includeImage: boolean;
+}): Promise<BulkContentResult> {
+  const { workspace } = await requireWorkspace();
+  const clean = (args.keywords ?? [])
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .slice(0, 20); // hard cap so a paste of 1000 keywords can't blow the budget
+  if (clean.length === 0) {
+    return { ok: false, error: "Add at least one keyword." };
+  }
+  const voice = (workspace.voiceProfile ?? null) as CmoVoiceProfile | null;
+
+  const created: Array<{ id: string; title: string; keyword: string }> = [];
+  let firstError: string | null = null;
+
+  for (const keyword of clean) {
+    try {
+      const result = await generateBulkBlog({
+        workspaceId: workspace.id,
+        keyword,
+        blogType: args.blogType,
+        includeImage: args.includeImage,
+        voice,
+        industry: workspace.industry,
+        icp: workspace.icp,
+      });
+      created.push({ id: result.draftId, title: result.title, keyword });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[content-bulk] keyword "${keyword}" failed: ${msg}`);
+      if (!firstError) firstError = `"${keyword}": ${msg}`;
+    }
+  }
+
+  revalidatePath("/content");
+  revalidatePath("/agents/content");
+  revalidatePath("/queue");
+
+  if (created.length === 0) {
+    return {
+      ok: false,
+      error: firstError ?? "All keywords failed to generate.",
+    };
+  }
+  if (firstError && created.length < clean.length) {
+    return { ok: true, created };
+  }
+  return { ok: true, created };
+}
