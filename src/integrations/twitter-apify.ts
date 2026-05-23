@@ -65,13 +65,15 @@ export async function apifySearchTweets(
   query: string,
   opts: ApifySearchOptions = {}
 ): Promise<ApifyTweet[]> {
-  if (!env.APIFY_TOKEN) throw new ApifyXNotConfiguredError();
+  // Prefer a dedicated X token if set; otherwise fall back to the shared APIFY_TOKEN.
+  const token = env.APIFY_X_TOKEN || env.APIFY_TOKEN;
+  if (!token) throw new ApifyXNotConfiguredError();
   if (!query.trim()) return [];
 
   const actor = env.APIFY_X_ACTOR_ID;
   const url =
     `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}` +
-    `/run-sync-get-dataset-items?token=${encodeURIComponent(env.APIFY_TOKEN)}`;
+    `/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
 
   const sinceDate = opts.sinceDays
     ? new Date(Date.now() - opts.sinceDays * 86_400_000)
