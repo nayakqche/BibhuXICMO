@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Download,
   ExternalLink,
@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
@@ -30,11 +31,41 @@ import { Textarea } from "@/frontend/components/ui/textarea";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Progress } from "@/frontend/components/ui/progress";
 import {
-  runIGSeedDiscoveryAction,
+  startIGSeedDiscoveryAction,
+  pollIGDiscoveryAction,
   recordIGDmSentAction,
   deleteIGCreatorAction,
   clearIGCreatorsAction,
 } from "./discover-actions";
+
+const POLL_INTERVAL_MS = 4_000;
+const MAX_RUN_MS = 15 * 60 * 1000; // 15 minutes
+const RUN_STORAGE_KEY = "ig-discovery-run";
+
+type RunInfo = {
+  runId: string;
+  datasetId: string;
+  startedAt: number;
+  seeds: string[];
+};
+
+function fmtElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+}
+
+function prettyStatus(s: string | null): string {
+  if (!s) return "Starting…";
+  if (s === "READY") return "Queued";
+  if (s === "RUNNING") return "Scraping creators";
+  if (s === "SUCCEEDED") return "Finishing up";
+  if (s === "FAILED") return "Failed";
+  if (s === "ABORTED") return "Aborted";
+  if (s === "TIMED-OUT") return "Timed out";
+  return s;
+}
 
 export type CreatorRow = {
   id: string;
@@ -122,12 +153,67 @@ export function InfluencerFind({
   const [seedsText, setSeedsText] = useState("");
   const [minFollowers, setMinFollowers] = useState("1000");
   const [maxFollowers, setMaxFollowers] = useState("250000");
+  const [maxProfiles, setMaxProfiles] = useState("100");
   const [categoryHint, setCategoryHint] = useState("");
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
-  const [progress, setProgress] = useState<number>(0);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [creators, setCreators] = useState<CreatorRow[]>(initialCreators);
   const [pending, startTransition] = useTransition();
+  const [run, setRun] = useState<RunInfo | null>(null);
+  const [runStatus, setRunStatus] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Restore an in-progress run after a page refresh.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(RUN_STORAGE_KEY);
+      if (!raw) return;
+      const r = JSON.parse(raw) as RunInfo;
+      if (
+        r &&
+        typeof r.runId === "string" &&
+        typeof r.datasetId === "string" &&
+        Date.now() - r.startedAt < MAX_RUN_MS
+      ) {
+        setRun(r);
+        setRunStatus("RUNNING");
+        kickoffPolling(r);
+      } else {
+        window.localStorage.removeItem(RUN_STORAGE_KEY);
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Tick the elapsed timer once per second while a run is in flight.
+  useEffect(() => {
+    if (!run) {
+      if (tickTimerRef.current) {
+        clearInterval(tickTimerRef.current);
+        tickTimerRef.current = null;
+      }
+      return;
+    }
+    setElapsedMs(Date.now() - run.startedAt);
+    tickTimerRef.current = setInterval(() => {
+      setElapsedMs(Date.now() - run.startedAt);
+    }, 1000);
+    return () => {
+      if (tickTimerRef.current) clearInterval(tickTimerRef.current);
+      tickTimerRef.current = null;
+    };
+  }, [run]);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (tickTimerRef.current) clearInterval(tickTimerRef.current);
+    };
+  }, []);
 
   const previewCreator: CreatorRow = useMemo(
     () =>
@@ -159,18 +245,64 @@ export function InfluencerFind({
     setTemplate((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}${label} `);
   }
 
-  function startProgressFake() {
-    setProgress(5);
-    let pct = 5;
-    const id = setInterval(() => {
-      pct = Math.min(92, pct + Math.random() * 8);
-      setProgress(pct);
-    }, 1200);
-    return () => {
-      clearInterval(id);
-      setProgress(100);
-      setTimeout(() => setProgress(0), 800);
+  function persistRun(r: RunInfo | null) {
+    if (typeof window === "undefined") return;
+    if (r) window.localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(r));
+    else window.localStorage.removeItem(RUN_STORAGE_KEY);
+  }
+
+  function clearRunState() {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setRun(null);
+    setRunStatus(null);
+    setElapsedMs(0);
+    persistRun(null);
+  }
+
+  function kickoffPolling(r: RunInfo) {
+    const tick = async () => {
+      // Hard ceiling — surface a timeout error instead of polling forever.
+      if (Date.now() - r.startedAt > MAX_RUN_MS) {
+        toast.error("Discovery timed out", {
+          description:
+            "The Apify run is taking longer than 15 minutes. Check the Apify console — your results may still arrive later.",
+        });
+        clearRunState();
+        return;
+      }
+      try {
+        const res = await pollIGDiscoveryAction({
+          runId: r.runId,
+          datasetId: r.datasetId,
+        });
+        if (!res.ok) {
+          toast.error("Discovery failed", { description: res.error });
+          clearRunState();
+          return;
+        }
+        setRunStatus(res.status);
+        if (res.finished) {
+          toast.success(`Found ${res.found} creators`, {
+            description:
+              res.saved > 0
+                ? `Saved ${res.saved} to your influencer list.`
+                : "No new profiles matched the filters.",
+          });
+          clearRunState();
+          if (typeof window !== "undefined") window.location.reload();
+          return;
+        }
+      } catch (err) {
+        // Transient network blips shouldn't kill the polling loop — log once
+        // and keep trying. The MAX_RUN_MS guard will eventually stop it.
+        console.warn("[ig] poll error:", err);
+      }
+      pollTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
     };
+    pollTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
   }
 
   async function onDiscover() {
@@ -189,45 +321,59 @@ export function InfluencerFind({
       });
       return;
     }
-    setStatusMessage("Starting scraper…");
-    const stop = startProgressFake();
+    setRunStatus("Starting…");
     startTransition(async () => {
       try {
-        const res = await runIGSeedDiscoveryAction({
+        const res = await startIGSeedDiscoveryAction({
           seeds,
           minFollowers: minFollowers ? parseInt(minFollowers, 10) : undefined,
           maxFollowers: maxFollowers ? parseInt(maxFollowers, 10) : undefined,
-          categoryHint: categoryHint || undefined,
+          maxProfiles: maxProfiles ? parseInt(maxProfiles, 10) : undefined,
         });
-        stop();
         if (!res.ok) {
-          setStatusMessage(null);
-          toast.error("Discovery failed", { description: res.error });
+          setRunStatus(null);
+          toast.error("Could not start discovery", { description: res.error });
           return;
         }
-        setStatusMessage(
-          `Found ${res.found} creators (scanned ${res.scanned} via #${res.hashtags.join(", #") || "—"}).`
-        );
-        toast.success(`Found ${res.found} creators`, {
-          description:
-            res.hashtags.length > 0
-              ? `Hashtags scanned: #${res.hashtags.join(", #")}`
-              : undefined,
+        const r: RunInfo = {
+          runId: res.runId,
+          datasetId: res.datasetId,
+          startedAt: Date.now(),
+          seeds,
+        };
+        setRun(r);
+        setRunStatus(res.status);
+        persistRun(r);
+        toast.success("Scraper started", {
+          description: `Run ${res.runId.slice(0, 8)}… on ${res.actor}. Polling every 4s — this usually takes 1–5 min.`,
         });
-        // The server action already revalidated the page; the parent will refresh
-        // via router. As a fast UX, also force a soft reload:
-        if (typeof window !== "undefined") {
-          window.location.reload();
-        }
+        kickoffPolling(r);
       } catch (err) {
-        stop();
-        setStatusMessage(null);
-        toast.error("Discovery failed", {
+        setRunStatus(null);
+        toast.error("Could not start discovery", {
           description: err instanceof Error ? err.message : String(err),
         });
       }
     });
   }
+
+  async function onCancelRun() {
+    if (!run) return;
+    if (
+      !confirm(
+        "Stop polling for this run? The Apify job will keep running on the server and you'll be billed for whatever profiles it analyzes before it finishes. Restart the discovery page later to see results."
+      )
+    ) {
+      return;
+    }
+    clearRunState();
+    toast.info("Stopped polling. The Apify job will finish in the background.");
+  }
+
+  const runActive = !!run;
+  const progressPct = runActive
+    ? Math.min(95, 5 + Math.round((elapsedMs / MAX_RUN_MS) * 90))
+    : 0;
 
   async function copyToClipboard(text: string): Promise<boolean> {
     try {
@@ -413,7 +559,7 @@ export function InfluencerFind({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-4">
             <div>
               <Label htmlFor="minF" className="text-xs">
                 Min followers
@@ -423,7 +569,7 @@ export function InfluencerFind({
                 inputMode="numeric"
                 value={minFollowers}
                 onChange={(e) => setMinFollowers(e.target.value.replace(/[^0-9]/g, ""))}
-                disabled={pending}
+                disabled={pending || runActive}
                 className="mt-1"
               />
             </div>
@@ -436,7 +582,20 @@ export function InfluencerFind({
                 inputMode="numeric"
                 value={maxFollowers}
                 onChange={(e) => setMaxFollowers(e.target.value.replace(/[^0-9]/g, ""))}
-                disabled={pending}
+                disabled={pending || runActive}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="maxP" className="text-xs">
+                Max profiles ($0.01/each)
+              </Label>
+              <Input
+                id="maxP"
+                inputMode="numeric"
+                value={maxProfiles}
+                onChange={(e) => setMaxProfiles(e.target.value.replace(/[^0-9]/g, ""))}
+                disabled={pending || runActive}
                 className="mt-1"
               />
             </div>
@@ -449,30 +608,54 @@ export function InfluencerFind({
                 value={categoryHint}
                 onChange={(e) => setCategoryHint(e.target.value)}
                 placeholder="e.g. fitness, photographer"
-                disabled={pending}
+                disabled={pending || runActive}
                 className="mt-1"
               />
             </div>
           </div>
 
-          {progress > 0 && (
-            <div className="space-y-1">
-              <Progress value={progress} className="h-1.5" />
-              <p className="text-xs text-muted-foreground">
-                {statusMessage ?? "Starting scraper…"} This may take 1–3
-                minutes depending on the number of seed accounts.
+          {runActive && (
+            <div className="rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  {prettyStatus(runStatus)}
+                  <span className="ml-2 font-mono text-xs text-muted-foreground">
+                    {fmtElapsed(elapsedMs)}
+                  </span>
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onCancelRun}
+                  className="h-7 gap-1 text-xs text-muted-foreground"
+                >
+                  <X className="h-3 w-3" />
+                  Stop polling
+                </Button>
+              </div>
+              <Progress value={progressPct} className="mt-2 h-1.5" />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Apify network expansion for{" "}
+                {run?.seeds.map((s) => `@${s}`).join(", ")}. Usually 1–5
+                minutes; up to 15 min for large maxProfiles. You can leave
+                this tab open or come back later — the run survives a
+                refresh.
               </p>
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={onDiscover} disabled={pending} className="gap-2">
-              {pending ? (
+            <Button
+              onClick={onDiscover}
+              disabled={pending || runActive}
+              className="gap-2"
+            >
+              {pending || runActive ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Search className="h-4 w-4" />
               )}
-              Find Creators
+              {runActive ? "Discovery running…" : "Find Creators"}
             </Button>
             {!hasApifyToken && (
               <p className="text-xs text-amber-600 dark:text-amber-400">

@@ -5,103 +5,159 @@ import { prisma } from "@/backend/db";
 import { requireWorkspace } from "@/backend/workspace";
 import { upsertIGCreator } from "@/backend/agents/instagram-db";
 import {
-  discoverFromSeeds,
-  type SeedDiscoveryOptions,
-} from "@/backend/agents/instagram-creators";
+  startIGNetworkRun,
+  getIGRunStatus,
+  fetchIGNetworkDataset,
+  isTerminalIGStatus,
+  ApifyIGNotConfiguredError,
+  ApifyIGNetworkError,
+} from "@/integrations/instagram-apify-network";
 
 const MAX_SEEDS = 5;
-const RUN_TIMEOUT_MS = 170_000;
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `Discovery is taking longer than ${Math.round(ms / 1000)}s. Try fewer seed accounts.`
-          )
-        ),
-      ms
-    );
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      }
-    );
-  });
-}
-
-type DiscoverInput = {
+type StartInput = {
   seeds: string[];
   minFollowers?: number;
   maxFollowers?: number;
-  categoryHint?: string;
+  maxProfiles?: number;
 };
 
-export async function runIGSeedDiscoveryAction(input: DiscoverInput) {
-  const { workspace } = await requireWorkspace();
+export type StartIGDiscoveryResult =
+  | { ok: true; runId: string; datasetId: string; status: string; actor: string }
+  | { ok: false; error: string };
+
+/**
+ * Kicks off an Apify network-expansion run and returns immediately
+ * (`runId` + `datasetId`). The browser then polls `pollIGDiscoveryAction`
+ * every few seconds — Apify network expansion takes 1–5 min, well past
+ * any serverless request timeout, so we never wait synchronously.
+ */
+export async function startIGSeedDiscoveryAction(
+  input: StartInput
+): Promise<StartIGDiscoveryResult> {
+  await requireWorkspace(); // auth/workspace guard only
   const seeds = (input.seeds ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, MAX_SEEDS);
   if (seeds.length === 0) {
-    return { ok: false as const, error: "Enter at least one seed account." };
+    return { ok: false, error: "Enter at least one seed account." };
   }
-
-  const opts: SeedDiscoveryOptions = {
-    seeds,
-    minFollowers: input.minFollowers,
-    maxFollowers: input.maxFollowers,
-    categoryHint: input.categoryHint,
-  };
-
-  const startedAt = Date.now();
-  let result;
   try {
-    result = await withTimeout(discoverFromSeeds(opts), RUN_TIMEOUT_MS);
+    const handle = await startIGNetworkRun({
+      seeds,
+      minFollowers: input.minFollowers,
+      maxFollowers: input.maxFollowers,
+      maxProfiles: input.maxProfiles ?? 100,
+    });
+    return {
+      ok: true,
+      runId: handle.runId,
+      datasetId: handle.datasetId,
+      status: handle.status,
+      actor: handle.actor,
+    };
+  } catch (err) {
+    if (err instanceof ApifyIGNotConfiguredError) {
+      return {
+        ok: false,
+        error:
+          "Set APIFY_TOKEN (or APIFY_IG_TOKEN) in Render → Environment to enable creator discovery.",
+      };
+    }
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to start discovery.",
+    };
+  }
+}
+
+export type PollIGDiscoveryResult =
+  | { ok: true; status: string; statusMessage?: string; finished: false }
+  | {
+      ok: true;
+      status: "SUCCEEDED";
+      statusMessage?: string;
+      finished: true;
+      found: number;
+      saved: number;
+    }
+  | { ok: false; status: string; error: string };
+
+/**
+ * Polls a previously-started Apify run. On terminal SUCCESS it fetches
+ * the dataset, normalizes the QuickAds-style PascalCase rows, and upserts
+ * them into the `IGCreator` table. On terminal FAILURE returns the error.
+ */
+export async function pollIGDiscoveryAction(args: {
+  runId: string;
+  datasetId: string;
+}): Promise<PollIGDiscoveryResult> {
+  const { workspace } = await requireWorkspace();
+  let status;
+  try {
+    status = await getIGRunStatus(args.runId);
   } catch (err) {
     return {
-      ok: false as const,
-      error: err instanceof Error ? err.message : "Discovery failed",
+      ok: false,
+      status: "UNKNOWN",
+      error: err instanceof Error ? err.message : "Could not reach Apify.",
     };
   }
 
-  if (result.error && result.profiles.length === 0) {
+  if (!isTerminalIGStatus(status.status)) {
     return {
-      ok: false as const,
-      error: result.error.includes("APIFY")
-        ? "Set APIFY_TOKEN (or APIFY_IG_TOKEN) in Render → Environment to enable creator discovery."
-        : result.error,
+      ok: true,
+      status: status.status,
+      statusMessage: status.statusMessage,
+      finished: false,
     };
   }
 
-  // Persist for later table loads + export.
+  if (status.status !== "SUCCEEDED") {
+    return {
+      ok: false,
+      status: status.status,
+      error:
+        status.statusMessage ??
+        `Discovery ${status.status.toLowerCase()} on Apify.`,
+    };
+  }
+
+  // SUCCEEDED — fetch + persist.
+  let profiles;
+  try {
+    profiles = await fetchIGNetworkDataset(status.datasetId ?? args.datasetId);
+  } catch (err) {
+    return {
+      ok: false,
+      status: "SUCCEEDED",
+      error: err instanceof Error ? err.message : "Failed to fetch results.",
+    };
+  }
+
   let saved = 0;
-  for (const p of result.profiles) {
+  for (const p of profiles) {
     const row = await upsertIGCreator({
       workspaceId: workspace.id,
       handle: p.handle,
-      fullName: p.fullName ?? null,
-      bio: p.bio ?? null,
+      fullName: p.fullName || null,
+      bio: p.bio || null,
       followers: p.followers,
-      following: p.following ?? null,
-      postsCount: p.posts ?? null,
-      engagementRate: p.engagementRate ?? null,
-      qualityScore: p.qualityScore ?? null,
-      email: p.email ?? null,
-      category: p.category ?? null,
-      niche: input.categoryHint ?? null,
-      isVerified: p.isVerified ?? false,
-      isBusiness: p.isBusiness ?? false,
-      externalUrl: p.externalUrl ?? null,
+      following: p.following,
+      postsCount: p.postsCount,
+      engagementRate: p.engagementRate,
+      qualityScore: p.qualityScore,
+      email: p.email,
+      category: p.category,
+      niche: null,
+      isVerified: p.isVerified,
+      isBusiness: !!p.category,
+      externalUrl: p.externalUrl,
       profileUrl: p.profileUrl,
-      // No LLM brand-fit ranker for seed discovery — quality score covers it.
-      fit: (p.qualityScore ?? 0) / 100,
+      // Use qualityScore/100 as a stand-in for "brand fit" until we layer
+      // an LLM ranker on top. Higher Quality = higher fit.
+      fit: p.qualityScore / 100,
     });
     if (row) saved++;
   }
@@ -109,12 +165,12 @@ export async function runIGSeedDiscoveryAction(input: DiscoverInput) {
   revalidatePath("/agents/instagram");
 
   return {
-    ok: true as const,
-    found: result.profiles.length,
+    ok: true,
+    status: "SUCCEEDED",
+    statusMessage: status.statusMessage,
+    finished: true,
+    found: profiles.length,
     saved,
-    hashtags: result.hashtagsUsed,
-    scanned: result.scanned,
-    elapsedMs: Date.now() - startedAt,
   };
 }
 
@@ -156,3 +212,7 @@ export async function clearIGCreatorsAction() {
   revalidatePath("/agents/instagram");
   return { ok: true as const };
 }
+
+// Silence the legacy ApifyIGNetworkError import — kept for future
+// fine-grained error mapping in callers without re-importing it.
+void ApifyIGNetworkError;

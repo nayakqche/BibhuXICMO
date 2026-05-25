@@ -92,6 +92,17 @@ const envSchema = z.object({
   APIFY_IG_HASHTAG_ACTOR_ID: z.string().default("apify~instagram-hashtag-scraper"),
   /** Apify actor id for Instagram DM automation (uses session cookies). */
   APIFY_IG_DM_ACTOR_ID: z.string().default("quickads~instagram-dm-automation"),
+  /**
+   * Apify actor id for the QuickAds-style network-expansion influencer
+   * discovery. This actor takes 1–5 seed handles and returns up to 500
+   * similar profiles with email, engagement rate, and a Quality label —
+   * the InfluencerFind tab on /agents/instagram uses this exclusively.
+   * Default: `afanasenko~instagram-profile-scraper` (Mode 3 networkExpansion).
+   * Billed at $0.01 per analyzed profile on Apify.
+   */
+  APIFY_IG_NETWORK_ACTOR_ID: z
+    .string()
+    .default("afanasenko~instagram-profile-scraper"),
 
   SENTRY_DSN: z.string().optional(),
 
