@@ -11,6 +11,7 @@ import { z } from "zod";
 import { meteredGenerateObject, pickAvailableModel } from "@/backend/llm";
 import {
   apifyScrapeHashtag,
+  apifyScrapeProfilePosts,
   apifyScrapeProfiles,
   ApifyIGNotConfiguredError,
   type IGScrapedProfile,
@@ -184,6 +185,186 @@ export async function rankCreatorsWithLLM(
   }
   ranked.sort((a, b) => b.fit - a.fit);
   return ranked;
+}
+
+// --------------------------------------------------------------------------
+// Seed-based discovery (QuickAds-style)
+// --------------------------------------------------------------------------
+//
+// Given a list of seed Instagram handles, this pipeline:
+//   1. Scrapes each seed profile (bio + last ~12 posts) via Apify.
+//   2. Extracts the seed's most-used hashtags.
+//   3. Runs each hashtag through the Apify hashtag scraper to collect
+//      candidate creators (post authors).
+//   4. De-duplicates handles, drops handles already in the seed list,
+//      batch-scrapes the top N as profiles, and applies follower-band
+//      + verified/email filters.
+//   5. Returns ranked creators ordered by qualityScore (no LLM call —
+//      this is purely heuristic so it stays cheap and fast).
+//
+// We deliberately skip the LLM brand-fit ranker here for parity with
+// QuickAds' approach: the user picks the seed list, so they've already
+// scoped the niche.
+
+export type SeedDiscoveryOptions = {
+  seeds: string[];
+  /** Min followers. Default 1k. */
+  minFollowers?: number;
+  /** Max followers. 0 = no cap. Default 250k (micro/mid). */
+  maxFollowers?: number;
+  /** Only include profiles whose bio matches this category (case-insensitive). */
+  categoryHint?: string;
+  /** Hard cap on candidates we'll batch-scrape. Default 40. */
+  resultsLimit?: number;
+  signal?: AbortSignal;
+};
+
+export type SeedDiscoveryResult = {
+  profiles: IGScrapedProfile[];
+  hashtagsUsed: string[];
+  scanned: number;
+  error?: string;
+};
+
+const HASHTAG_FANOUT_LIMIT = 3; // hashtags per discovery run
+const POSTS_PER_HASHTAG = 15;
+
+function topHashtagsFrom(text: string, limit: number): string[] {
+  const counts = new Map<string, number>();
+  for (const m of text.matchAll(/#([\p{L}\p{N}_]+)/gu)) {
+    const k = m[1].toLowerCase();
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => k)
+    .slice(0, limit);
+}
+
+export async function discoverFromSeeds(
+  opts: SeedDiscoveryOptions
+): Promise<SeedDiscoveryResult> {
+  const seeds = opts.seeds
+    .map((s) => s.replace(/^@/, "").trim().toLowerCase())
+    .filter(Boolean);
+  if (seeds.length === 0) {
+    return { profiles: [], hashtagsUsed: [], scanned: 0 };
+  }
+
+  const minFollowers = opts.minFollowers ?? 1_000;
+  const maxFollowers = opts.maxFollowers ?? 250_000;
+  const resultsLimit = Math.min(opts.resultsLimit ?? 40, 60);
+  const categoryHint = opts.categoryHint?.trim().toLowerCase();
+
+  // 1. Scrape seed profiles to get their bios.
+  let seedProfiles: IGScrapedProfile[] = [];
+  try {
+    seedProfiles = await apifyScrapeProfiles(seeds, {
+      resultsLimit: seeds.length,
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof ApifyIGNotConfiguredError) {
+      return { profiles: [], hashtagsUsed: [], scanned: 0, error: err.message };
+    }
+    console.warn("[ig] seed profile scrape failed:", err);
+  }
+
+  // 2. Mine top hashtags from seeds' bios + grab a few posts to find more.
+  const hashtagPool = new Map<string, number>();
+  for (const p of seedProfiles) {
+    for (const tag of topHashtagsFrom(p.bio ?? "", 4)) {
+      hashtagPool.set(tag, (hashtagPool.get(tag) ?? 0) + 1);
+    }
+  }
+
+  // If bios didn't reveal enough, peek at each seed's recent posts.
+  if (hashtagPool.size < HASHTAG_FANOUT_LIMIT) {
+    for (const seed of seeds.slice(0, 3)) {
+      try {
+        const posts = await apifyScrapeProfilePosts(seed, {
+          resultsLimit: 6,
+          signal: opts.signal,
+        });
+        for (const p of posts) {
+          for (const tag of p.hashtags.slice(0, 4)) {
+            hashtagPool.set(tag, (hashtagPool.get(tag) ?? 0) + 1);
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+      if (hashtagPool.size >= HASHTAG_FANOUT_LIMIT * 2) break;
+    }
+  }
+
+  const hashtagsUsed = [...hashtagPool.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => k)
+    .slice(0, HASHTAG_FANOUT_LIMIT);
+
+  // 3. Fan-out to hashtag scraper to collect candidate handles.
+  const candidateHandles = new Set<string>();
+  const seedSet = new Set(seeds);
+  for (const tag of hashtagsUsed) {
+    try {
+      const posts = await apifyScrapeHashtag(tag, {
+        resultsLimit: POSTS_PER_HASHTAG,
+        signal: opts.signal,
+      });
+      for (const post of posts) {
+        const h = post.ownerHandle.toLowerCase();
+        if (h && h !== "unknown" && !seedSet.has(h)) {
+          candidateHandles.add(h);
+        }
+      }
+    } catch (err) {
+      console.warn(`[ig] hashtag fan-out failed for "${tag}":`, err);
+    }
+    if (candidateHandles.size >= resultsLimit * 2) break;
+  }
+
+  // Always include the seeds themselves so the user sees them at the top.
+  const allHandles = [...seeds, ...candidateHandles].slice(0, resultsLimit + seeds.length);
+
+  // 4. Batch-scrape candidate profiles.
+  let profiles: IGScrapedProfile[] = [];
+  try {
+    profiles = await apifyScrapeProfiles(allHandles, {
+      resultsLimit: allHandles.length,
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof ApifyIGNotConfiguredError) {
+      return {
+        profiles: [],
+        hashtagsUsed,
+        scanned: candidateHandles.size,
+        error: err.message,
+      };
+    }
+    console.warn("[ig] candidate profile scrape failed:", err);
+  }
+
+  // 5. Filter + sort.
+  const filtered = profiles.filter((p) => {
+    if (p.followers < minFollowers) return false;
+    if (maxFollowers > 0 && p.followers > maxFollowers) return false;
+    if (categoryHint) {
+      const cat = (p.category ?? "").toLowerCase();
+      const bio = (p.bio ?? "").toLowerCase();
+      if (!cat.includes(categoryHint) && !bio.includes(categoryHint)) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0));
+
+  return {
+    profiles: filtered,
+    hashtagsUsed,
+    scanned: candidateHandles.size,
+  };
 }
 
 export async function discoverIGCreators(

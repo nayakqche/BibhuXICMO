@@ -41,8 +41,58 @@ export type IGScrapedProfile = {
   isVerified?: boolean;
   profileUrl: string;
   externalUrl?: string;
+  /** Email extracted from bio (regex). */
+  email?: string;
+  /** IG business category name, e.g. "Photographer", "Personal blog". */
+  category?: string;
+  /** Computed (avg likes per post / followers). 0–1, often 0.005–0.10. */
   engagementRate?: number;
+  /** Heuristic 0–100 quality score (engagement + ratio + activity). */
+  qualityScore?: number;
 };
+
+const EMAIL_RX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+
+function extractEmail(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const m = text.match(EMAIL_RX);
+  return m ? m[0].toLowerCase() : undefined;
+}
+
+/**
+ * Heuristic quality score 0-100:
+ *  - engagement rate (0–40)
+ *  - follower-to-following ratio (0–25)
+ *  - account is verified (+15) or business (+10)
+ *  - has email contact (+10)
+ *  - active account, ≥30 posts (+10)
+ */
+function computeQualityScore(p: {
+  followers: number;
+  following?: number;
+  posts?: number;
+  engagementRate?: number;
+  isVerified?: boolean;
+  isBusiness?: boolean;
+  email?: string;
+}): number {
+  let s = 0;
+  if (typeof p.engagementRate === "number" && p.engagementRate > 0) {
+    // 3%+ is excellent; 1% is average. Cap at 40.
+    s += Math.min(40, Math.round(p.engagementRate * 1000));
+  }
+  if (p.following && p.following > 0) {
+    const ratio = p.followers / p.following;
+    if (ratio >= 10) s += 25;
+    else if (ratio >= 3) s += 18;
+    else if (ratio >= 1) s += 10;
+  }
+  if (p.isVerified) s += 15;
+  else if (p.isBusiness) s += 10;
+  if (p.email) s += 10;
+  if (p.posts && p.posts >= 30) s += 10;
+  return Math.min(100, s);
+}
 
 export class ApifyIGNotConfiguredError extends Error {
   constructor() {
@@ -195,20 +245,73 @@ function normalizeProfile(item: unknown): IGScrapedProfile | null {
     "follower_count",
   ]) ?? 0;
 
+  const following = pickNumber(o, ["followsCount", "following", "followingCount"]);
+  const posts = pickNumber(o, ["postsCount", "mediaCount", "posts"]);
+  const bio = pickString(o, ["biography", "bio", "description"]);
+  const isVerified = o.verified === true || o.isVerified === true;
+  const isBusiness = o.isBusinessAccount === true || o.isBusiness === true;
+  const email =
+    pickString(o, ["publicEmail", "businessEmail", "contact_email"]) ??
+    extractEmail(bio);
+  const category = pickString(o, [
+    "businessCategoryName",
+    "categoryName",
+    "category",
+    "category_name",
+  ]);
+
+  // Some Apify actors return latest-posts metrics so we can compute ER.
+  let engagementRate = pickNumber(o, ["engagementRate", "engagement_rate"]);
+  if (engagementRate === undefined && followers > 0) {
+    const latestPosts = Array.isArray(o.latestPosts) ? o.latestPosts : null;
+    if (latestPosts && latestPosts.length) {
+      let totalLikes = 0;
+      let totalComments = 0;
+      let counted = 0;
+      for (const p of latestPosts.slice(0, 12)) {
+        const po = asObject(p);
+        if (!po) continue;
+        const likes =
+          pickNumber(po, ["likesCount", "likes", "edge_liked_by"]) ?? 0;
+        const comments = pickNumber(po, ["commentsCount", "comments"]) ?? 0;
+        totalLikes += likes;
+        totalComments += comments;
+        counted++;
+      }
+      if (counted > 0) {
+        const avg = (totalLikes + totalComments) / counted;
+        engagementRate = avg / followers;
+      }
+    }
+  }
+
+  const partial = {
+    followers,
+    following,
+    posts,
+    engagementRate,
+    isVerified,
+    isBusiness,
+    email,
+  };
+
   return {
     handle,
     fullName: pickString(o, ["fullName", "name"]),
-    bio: pickString(o, ["biography", "bio", "description"]),
+    bio,
     followers,
-    following: pickNumber(o, ["followsCount", "following", "followingCount"]),
-    posts: pickNumber(o, ["postsCount", "mediaCount", "posts"]),
-    isBusiness: o.isBusinessAccount === true || o.isBusiness === true,
-    isVerified: o.verified === true || o.isVerified === true,
+    following,
+    posts,
+    isBusiness,
+    isVerified,
+    email,
+    category,
     profileUrl:
       pickString(o, ["profileUrl", "url"]) ??
       `https://www.instagram.com/${handle}/`,
     externalUrl: pickString(o, ["externalUrl", "website"]),
-    engagementRate: pickNumber(o, ["engagementRate", "engagement_rate"]),
+    engagementRate,
+    qualityScore: computeQualityScore(partial),
   };
 }
 
