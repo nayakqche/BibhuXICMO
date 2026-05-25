@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { Instagram, Sparkles } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
+import { env } from "@/shared/env";
 import { InstagramRunButtons } from "@/frontend/components/app/instagram-run-buttons";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
@@ -31,6 +32,7 @@ import { IGComposer } from "./composer";
 import { IGCookiesModal } from "./ig-cookies-modal";
 import { CampaignControls } from "./campaign-controls";
 import { CampaignForm } from "./campaign-form";
+import { InfluencerFind, type CreatorRow } from "./influencer-find";
 
 export const metadata = { title: "Instagram Agent" };
 
@@ -87,8 +89,12 @@ export default async function InstagramAgentPage() {
     prisma.iGCreator
       .findMany({
         where: { workspaceId: workspace.id },
-        orderBy: [{ fit: "desc" }, { discoveredAt: "desc" }],
-        take: 25,
+        orderBy: [
+          { qualityScore: "desc" },
+          { fit: "desc" },
+          { discoveredAt: "desc" },
+        ],
+        take: 100,
       })
       .catch(() => []),
     prisma.iGCampaign
@@ -126,6 +132,24 @@ export default async function InstagramAgentPage() {
     ? `@${igAccount.username}`
     : igAccount?.pageName ?? "Connected";
 
+  const hasApifyToken = Boolean(env.APIFY_IG_TOKEN || env.APIFY_TOKEN);
+
+  const creatorRows: CreatorRow[] = creators.map((c) => ({
+    id: c.id,
+    handle: c.handle,
+    fullName: c.fullName,
+    bio: c.bio,
+    followers: c.followers,
+    following: c.following,
+    engagementRate: c.engagementRate,
+    qualityScore: c.qualityScore,
+    email: c.email,
+    category: c.category,
+    isVerified: c.isVerified,
+    profileUrl: c.profileUrl,
+    lastDmAt: c.lastDmAt,
+  }));
+
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -137,9 +161,8 @@ export default async function InstagramAgentPage() {
             </h1>
           </div>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            Daily Post / Reel / Story drafts in your voice, comment replies on
-            your own posts, hashtag discovery, and (opt-in) influencer outreach
-            with AI negotiation autopilot.{" "}
+            Find creators in your niche, copy a personalized DM, and (optionally)
+            generate daily Post / Reel / Story drafts in your brand voice.{" "}
             {integration
               ? `Connected as ${igLabel}.`
               : "Connect Instagram via Facebook Login to auto-publish."}
@@ -155,303 +178,263 @@ export default async function InstagramAgentPage() {
         </div>
       </div>
 
-      <InstagramRunButtons />
+      {/* ====== PRIMARY VIEW: QuickAds-style InfluencerFind ====== */}
+      <InfluencerFind
+        initialCreators={creatorRows}
+        hasApifyToken={hasApifyToken}
+      />
 
-      <Tabs defaultValue="posts" className="space-y-6">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="posts">Posts ({feedDrafts.length})</TabsTrigger>
-          <TabsTrigger value="reels">Reels ({reelDrafts.length})</TabsTrigger>
-          <TabsTrigger value="stories">Stories ({storyDrafts.length})</TabsTrigger>
-          <TabsTrigger value="replies">Replies ({replyDrafts.length})</TabsTrigger>
-          <TabsTrigger value="discovered">
-            Discovered ({threads.length})
-          </TabsTrigger>
-          <TabsTrigger value="influencers">
-            Influencers ({creators.length})
-          </TabsTrigger>
-          <TabsTrigger value="campaigns">
-            Campaigns ({campaigns.length})
-          </TabsTrigger>
-          <TabsTrigger value="composer">Composer</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-        </TabsList>
+      {/* ====== SECONDARY: Content drafts, replies, campaigns, runs ====== */}
+      <div className="border-t pt-6">
+        <h2 className="mb-3 text-lg font-semibold tracking-tight">
+          Content & engagement
+        </h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Daily Post / Reel / Story drafts and comment-reply automation. Run
+          buttons below trigger one-off scans.
+        </p>
+        <InstagramRunButtons />
 
-        <TabsContent value="posts">
-          <DraftList
-            drafts={feedDrafts}
-            empty="No feed-post drafts yet. Click Generate posts to create today's batch."
-          />
-        </TabsContent>
+        <Tabs defaultValue="posts" className="mt-6 space-y-6">
+          <TabsList className="flex-wrap">
+            <TabsTrigger value="posts">Posts ({feedDrafts.length})</TabsTrigger>
+            <TabsTrigger value="reels">Reels ({reelDrafts.length})</TabsTrigger>
+            <TabsTrigger value="stories">Stories ({storyDrafts.length})</TabsTrigger>
+            <TabsTrigger value="replies">Replies ({replyDrafts.length})</TabsTrigger>
+            <TabsTrigger value="discovered">
+              Discovered ({threads.length})
+            </TabsTrigger>
+            <TabsTrigger value="campaigns">
+              Campaigns ({campaigns.length})
+            </TabsTrigger>
+            <TabsTrigger value="composer">Composer</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="reels">
-          <DraftList
-            drafts={reelDrafts}
-            empty="No Reel drafts yet. Click Generate posts — Reels are generated alongside feed posts."
-          />
-        </TabsContent>
+          <TabsContent value="posts">
+            <DraftList
+              drafts={feedDrafts}
+              empty="No feed-post drafts yet. Click Generate posts to create today's batch."
+            />
+          </TabsContent>
 
-        <TabsContent value="stories">
-          <DraftList
-            drafts={storyDrafts}
-            empty="No Story drafts yet."
-          />
-        </TabsContent>
+          <TabsContent value="reels">
+            <DraftList
+              drafts={reelDrafts}
+              empty="No Reel drafts yet. Click Generate posts — Reels are generated alongside feed posts."
+            />
+          </TabsContent>
 
-        <TabsContent value="replies">
-          <DraftList
-            drafts={replyDrafts}
-            empty="No reply drafts. Click Scan comments to look at your own posts, or Discover posts to find others to comment on."
-          />
-        </TabsContent>
+          <TabsContent value="stories">
+            <DraftList drafts={storyDrafts} empty="No Story drafts yet." />
+          </TabsContent>
 
-        <TabsContent value="discovered">
-          <Card>
-            <CardHeader>
-              <CardTitle>Discovered Instagram posts</CardTitle>
-              <CardDescription>
-                Hashtag-discovered posts ranked by LLM relevance (≥
-                {Math.round(MIN_IG_DISCOVERED_RELEVANCE * 100)}%), highest first.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {threads.length === 0 ? (
-                <p className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
-                  Run Discover posts to populate this list.
-                </p>
-              ) : (
-                <ul className="divide-y">
-                  {threads.map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex items-start justify-between gap-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <a
-                          href={t.permalink}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="text-sm font-medium hover:text-primary"
-                        >
-                          @{t.authorHandle}
-                        </a>
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {t.caption}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t.likes} likes · {t.comments} comments · relevance{" "}
-                          {Math.round(t.relevance * 100)}%
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+          <TabsContent value="replies">
+            <DraftList
+              drafts={replyDrafts}
+              empty="No reply drafts. Click Scan comments to look at your own posts."
+            />
+          </TabsContent>
 
-        <TabsContent value="influencers">
-          <Card>
-            <CardHeader>
-              <CardTitle>Discovered creators</CardTitle>
-              <CardDescription>
-                Ranked by LLM-scored brand fit. Add them to an active campaign
-                to generate cold DMs.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {creators.length === 0 ? (
-                <p className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
-                  Click Find creators to surface influencers in your niche.
-                </p>
-              ) : (
-                <ul className="divide-y">
-                  {creators.map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-start justify-between gap-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <a
-                          href={c.profileUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="text-sm font-medium hover:text-primary"
-                        >
-                          @{c.handle}
-                        </a>
-                        {c.fullName ? (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {c.fullName}
-                          </span>
-                        ) : null}
-                        {c.bio ? (
-                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                            {c.bio}
-                          </p>
-                        ) : null}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {c.followers.toLocaleString()} followers ·
-                          {c.engagementRate
-                            ? ` ${(c.engagementRate * 100).toFixed(1)}% engagement · `
-                            : " "}
-                          fit {Math.round(c.fit * 100)}%
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="campaigns" className="space-y-4">
-          <CampaignForm />
-          {dmDrafts.length > 0 && (
+          <TabsContent value="discovered">
             <Card>
               <CardHeader>
-                <CardTitle>Pending DMs</CardTitle>
+                <CardTitle>Discovered Instagram posts</CardTitle>
                 <CardDescription>
-                  Outreach + negotiation messages awaiting approval or scheduled
-                  to send.
+                  Hashtag-discovered posts ranked by LLM relevance (≥
+                  {Math.round(MIN_IG_DISCOVERED_RELEVANCE * 100)}%), highest first.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ul className="divide-y">
-                  {dmDrafts.map((d) => {
-                    const kind = getKind(d.meta);
-                    return (
-                      <li key={d.id} className="py-3">
-                        <Link
-                          href={`/content/${d.id}`}
-                          className="block hover:text-primary"
-                        >
-                          <div className="flex items-center gap-2">
-                            {kind && (
-                              <Badge variant="secondary" className="text-[10px]">
-                                {igKindLabel(kind)}
-                              </Badge>
-                            )}
-                            <Badge variant="outline" className="text-[10px]">
-                              {d.status.toLowerCase().replace("_", " ")}
-                            </Badge>
-                            <span className="truncate text-sm font-medium">
-                              {d.title || "Untitled"}
-                            </span>
-                          </div>
-                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                            {d.body.slice(0, 180)}
+                {threads.length === 0 ? (
+                  <p className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
+                    Run Discover posts to populate this list.
+                  </p>
+                ) : (
+                  <ul className="divide-y">
+                    {threads.map((t) => (
+                      <li
+                        key={t.id}
+                        className="flex items-start justify-between gap-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <a
+                            href={t.permalink}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="text-sm font-medium hover:text-primary"
+                          >
+                            @{t.authorHandle}
+                          </a>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {t.caption}
                           </p>
-                        </Link>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t.likes} likes · {t.comments} comments · relevance{" "}
+                            {Math.round(t.relevance * 100)}%
+                          </p>
+                        </div>
                       </li>
-                    );
-                  })}
-                </ul>
+                    ))}
+                  </ul>
+                )}
               </CardContent>
             </Card>
-          )}
-          {campaigns.length === 0 ? (
-            <p className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
-              No outreach campaigns yet. Create one to start finding influencers.
-            </p>
-          ) : (
-            campaigns.map((c) => (
-              <Card key={c.id}>
-                <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      {c.name}
-                      <Badge
-                        variant={c.status === "ACTIVE" ? "default" : "outline"}
-                      >
-                        {c.status.toLowerCase()}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      {c.brand} · budget ${c.budgetMin}–${c.budgetMax} ·{" "}
-                      {c.negotiations.length} negotiation
-                      {c.negotiations.length === 1 ? "" : "s"}
-                    </CardDescription>
-                  </div>
-                  <CampaignControls
-                    campaignId={c.id}
-                    status={c.status}
-                    autopilot={c.autopilot}
-                  />
+          </TabsContent>
+
+          <TabsContent value="campaigns" className="space-y-4">
+            <CampaignForm />
+            {dmDrafts.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Pending DMs</CardTitle>
+                  <CardDescription>
+                    Outreach + negotiation messages awaiting approval or
+                    scheduled to send.
+                  </CardDescription>
                 </CardHeader>
-                {c.brief && (
-                  <CardContent className="text-sm text-muted-foreground">
-                    {c.brief.slice(0, 300)}
-                  </CardContent>
-                )}
+                <CardContent>
+                  <ul className="divide-y">
+                    {dmDrafts.map((d) => {
+                      const kind = getKind(d.meta);
+                      return (
+                        <li key={d.id} className="py-3">
+                          <Link
+                            href={`/content/${d.id}`}
+                            className="block hover:text-primary"
+                          >
+                            <div className="flex items-center gap-2">
+                              {kind && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px]"
+                                >
+                                  {igKindLabel(kind)}
+                                </Badge>
+                              )}
+                              <Badge variant="outline" className="text-[10px]">
+                                {d.status.toLowerCase().replace("_", " ")}
+                              </Badge>
+                              <span className="truncate text-sm font-medium">
+                                {d.title || "Untitled"}
+                              </span>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                              {d.body.slice(0, 180)}
+                            </p>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
               </Card>
-            ))
-          )}
-        </TabsContent>
+            )}
+            {campaigns.length === 0 ? (
+              <p className="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
+                No outreach campaigns yet. Create one to start finding
+                influencers.
+              </p>
+            ) : (
+              campaigns.map((c) => (
+                <Card key={c.id}>
+                  <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        {c.name}
+                        <Badge
+                          variant={
+                            c.status === "ACTIVE" ? "default" : "outline"
+                          }
+                        >
+                          {c.status.toLowerCase()}
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        {c.brand} · budget ${c.budgetMin}–${c.budgetMax} ·{" "}
+                        {c.negotiations.length} negotiation
+                        {c.negotiations.length === 1 ? "" : "s"}
+                      </CardDescription>
+                    </div>
+                    <CampaignControls
+                      campaignId={c.id}
+                      status={c.status}
+                      autopilot={c.autopilot}
+                    />
+                  </CardHeader>
+                  {c.brief && (
+                    <CardContent className="text-sm text-muted-foreground">
+                      {c.brief.slice(0, 300)}
+                    </CardContent>
+                  )}
+                </Card>
+              ))
+            )}
+          </TabsContent>
 
-        <TabsContent value="composer">
-          <IGComposer />
-        </TabsContent>
+          <TabsContent value="composer">
+            <IGComposer />
+          </TabsContent>
 
-        <TabsContent value="runs">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent runs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {runs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No runs yet. Click <Sparkles className="inline h-3 w-3" />{" "}
-                  Generate posts above.
-                </p>
-              ) : (
-                <ul className="divide-y text-sm">
-                  {runs.map((r) => {
-                    const out = r.output as
-                      | {
-                          drafts?: number;
-                          surfaced?: number;
-                          discovered?: number;
-                          message?: string;
-                        }
-                      | null;
-                    return (
-                      <li key={r.id} className="py-2">
-                        <div className="flex justify-between gap-2">
-                          <span className="capitalize">
-                            {r.status.toLowerCase()}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {format(r.startedAt, "MMM d · HH:mm")} ·{" "}
-                            {r.creditsUsed} credits
-                          </span>
-                        </div>
-                        {r.status === "SUCCESS" && out && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {typeof out.drafts === "number" &&
-                              `Drafts: ${out.drafts} · `}
-                            {typeof out.discovered === "number" &&
-                              `Discovered: ${out.discovered} · `}
-                            {typeof out.surfaced === "number" &&
-                              `Engagement: ${out.surfaced}`}
-                            {out.message ? ` — ${out.message}` : null}
-                          </p>
-                        )}
-                        {r.status === "FAILED" && r.error && (
-                          <p className="mt-1 text-xs text-destructive">
-                            {r.error}
-                          </p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="runs">
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent runs</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {runs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No runs yet. Click <Sparkles className="inline h-3 w-3" />{" "}
+                    Generate posts above.
+                  </p>
+                ) : (
+                  <ul className="divide-y text-sm">
+                    {runs.map((r) => {
+                      const out = r.output as
+                        | {
+                            drafts?: number;
+                            surfaced?: number;
+                            discovered?: number;
+                            message?: string;
+                          }
+                        | null;
+                      return (
+                        <li key={r.id} className="py-2">
+                          <div className="flex justify-between gap-2">
+                            <span className="capitalize">
+                              {r.status.toLowerCase()}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {format(r.startedAt, "MMM d · HH:mm")} ·{" "}
+                              {r.creditsUsed} credits
+                            </span>
+                          </div>
+                          {r.status === "SUCCESS" && out && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {typeof out.drafts === "number" &&
+                                `Drafts: ${out.drafts} · `}
+                              {typeof out.discovered === "number" &&
+                                `Discovered: ${out.discovered} · `}
+                              {typeof out.surfaced === "number" &&
+                                `Engagement: ${out.surfaced}`}
+                              {out.message ? ` — ${out.message}` : null}
+                            </p>
+                          )}
+                          {r.status === "FAILED" && r.error && (
+                            <p className="mt-1 text-xs text-destructive">
+                              {r.error}
+                            </p>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }

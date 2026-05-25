@@ -381,10 +381,18 @@ model IGCreator {
   fullName        String?
   bio             String?   @db.Text
   followers       Int       @default(0)
+  following       Int?
+  postsCount      Int?
   engagementRate  Float?
+  qualityScore    Int? // 0-100 heuristic (engagement, ratio, activity)
+  email           String? // extracted from bio
+  category        String? // IG business category, e.g. "Photographer"
   niche           String?
+  isVerified      Boolean   @default(false)
+  isBusiness      Boolean   @default(false)
   profileUrl      String
-  fit             Float     @default(0) // 0–1 brand fit
+  externalUrl     String?
+  fit             Float     @default(0) // 0–1 brand fit (LLM-scored)
   notes           String?   @db.Text
   lastDmAt        DateTime?
   discoveredAt    DateTime  @default(now())
