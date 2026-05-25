@@ -67,11 +67,19 @@ export function InstagramRunButtons() {
           });
         }
       } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        // "fetch failed" / "Failed to fetch" / "NetworkError" all mean the
+        // browser's connection to the server action was dropped — usually
+        // because the run exceeded the platform's request timeout. Surface
+        // a useful next step instead of the raw undici message.
+        const isNetworkAbort =
+          /fetch\s+failed|failed to fetch|networkerror|aborted|econnreset|connection (closed|reset)/i.test(
+            raw
+          );
         toast.error(`${label} failed`, {
-          description:
-            err instanceof Error
-              ? err.message
-              : "Request timed out or lost connection. Try again in a moment.",
+          description: isNetworkAbort
+            ? "Server took too long to respond (Render's free tier closes connections after ~100s). The run may have started — check the Runs tab in a minute. If it persists, set ANTHROPIC_API_KEY or OPENAI_API_KEY, or upgrade the web service to Starter."
+            : raw || "Unknown error",
         });
       }
     });

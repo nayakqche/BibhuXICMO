@@ -278,23 +278,24 @@ export async function discoverFromSeeds(
     }
   }
 
-  // If bios didn't reveal enough, peek at each seed's recent posts.
+  // If bios didn't reveal enough, peek at each seed's recent posts —
+  // in PARALLEL so the wall time is one actor run, not N.
   if (hashtagPool.size < HASHTAG_FANOUT_LIMIT) {
-    for (const seed of seeds.slice(0, 3)) {
-      try {
-        const posts = await apifyScrapeProfilePosts(seed, {
+    const postLookups = await Promise.allSettled(
+      seeds.slice(0, 3).map((seed) =>
+        apifyScrapeProfilePosts(seed, {
           resultsLimit: 6,
           signal: opts.signal,
-        });
-        for (const p of posts) {
-          for (const tag of p.hashtags.slice(0, 4)) {
-            hashtagPool.set(tag, (hashtagPool.get(tag) ?? 0) + 1);
-          }
+        })
+      )
+    );
+    for (const r of postLookups) {
+      if (r.status !== "fulfilled") continue;
+      for (const p of r.value) {
+        for (const tag of p.hashtags.slice(0, 4)) {
+          hashtagPool.set(tag, (hashtagPool.get(tag) ?? 0) + 1);
         }
-      } catch {
-        /* best-effort */
       }
-      if (hashtagPool.size >= HASHTAG_FANOUT_LIMIT * 2) break;
     }
   }
 
@@ -303,23 +304,31 @@ export async function discoverFromSeeds(
     .map(([k]) => k)
     .slice(0, HASHTAG_FANOUT_LIMIT);
 
-  // 3. Fan-out to hashtag scraper to collect candidate handles.
+  // 3. Fan-out to hashtag scraper IN PARALLEL.
   const candidateHandles = new Set<string>();
   const seedSet = new Set(seeds);
-  for (const tag of hashtagsUsed) {
-    try {
-      const posts = await apifyScrapeHashtag(tag, {
+  const hashtagRuns = await Promise.allSettled(
+    hashtagsUsed.map((tag) =>
+      apifyScrapeHashtag(tag, {
         resultsLimit: POSTS_PER_HASHTAG,
         signal: opts.signal,
-      });
-      for (const post of posts) {
-        const h = post.ownerHandle.toLowerCase();
-        if (h && h !== "unknown" && !seedSet.has(h)) {
-          candidateHandles.add(h);
-        }
+      })
+    )
+  );
+  for (let i = 0; i < hashtagRuns.length; i++) {
+    const r = hashtagRuns[i];
+    if (r.status !== "fulfilled") {
+      console.warn(
+        `[ig] hashtag fan-out failed for "${hashtagsUsed[i]}":`,
+        r.reason
+      );
+      continue;
+    }
+    for (const post of r.value) {
+      const h = post.ownerHandle.toLowerCase();
+      if (h && h !== "unknown" && !seedSet.has(h)) {
+        candidateHandles.add(h);
       }
-    } catch (err) {
-      console.warn(`[ig] hashtag fan-out failed for "${tag}":`, err);
     }
     if (candidateHandles.size >= resultsLimit * 2) break;
   }

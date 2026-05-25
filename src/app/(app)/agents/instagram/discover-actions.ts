@@ -36,7 +36,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-export type DiscoverInput = {
+type DiscoverInput = {
   seeds: string[];
   minFollowers?: number;
   maxFollowers?: number;

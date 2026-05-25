@@ -204,9 +204,15 @@ export async function runIGPostGeneration(
     },
   ];
 
-  let drafts = 0;
-  for (const { kind, prompt } of targets) {
-    try {
+  // Run the 3 caption drafts (post / reel / story) IN PARALLEL.
+  // Each call to Claude Sonnet/gpt-4o can take 20-45s sequentially; on
+  // Render's free tier the request proxy gives up around ~100s, which is
+  // exactly what causes the "fetch failed" error the user sees when the
+  // browser's fetch to the server action is cut. Parallel runs cap wall
+  // time at max(post, reel, story) ≈ 30s instead of summing them.
+  const draftErrors: string[] = [];
+  const results = await Promise.allSettled(
+    targets.map(async ({ kind, prompt }) => {
       const { object } = await meteredGenerateObject(prompt, captionSchema, {
         workspaceId: ctx.workspaceId,
         reason: `ig.daily.${kind}`,
@@ -251,9 +257,21 @@ export async function runIGPostGeneration(
           priority: "MEDIUM",
         },
       });
+      return kind;
+    })
+  );
+
+  let drafts = 0;
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const kind = targets[i].kind;
+    if (r.status === "fulfilled") {
       drafts++;
-    } catch (err) {
-      console.warn(`[ig] daily ${kind} draft failed:`, err);
+    } else {
+      const msg =
+        r.reason instanceof Error ? r.reason.message : String(r.reason);
+      console.warn(`[ig] daily ${kind} draft failed:`, msg);
+      draftErrors.push(`${kind}: ${msg.slice(0, 120)}`);
     }
   }
 
@@ -261,10 +279,23 @@ export async function runIGPostGeneration(
     staleRejected > 0
       ? ` Removed ${staleRejected} outdated draft(s) from your previous website.`
       : "";
+  if (drafts === 0) {
+    // Surface the underlying LLM error (e.g. "fetch failed", "Insufficient
+    // quota") so the user knows exactly what to fix instead of staring at
+    // a generic "Could not generate IG drafts" message.
+    const why = draftErrors[0]
+      ? ` Reason: ${draftErrors[0]}`
+      : "";
+    return {
+      drafts: 0,
+      staleRejected,
+      message: `Could not generate IG drafts.${why}${extra}`,
+    };
+  }
   return {
     drafts,
     staleRejected,
-    message: drafts === 0 ? `Could not generate IG drafts.${extra}` : extra || undefined,
+    message: extra || undefined,
   };
 }
 
