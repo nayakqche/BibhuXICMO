@@ -321,10 +321,11 @@ export async function loadCmoSlowData(args: {
     withPageSpeed = true,
   } = args;
 
-  // ---- L1 lookup: DB-backed snapshot ----
-  // This is the path that fires on ~99% of tab-switch / dashboard ↔ CMO
-  // navigations. Hits in ~50ms (single Workspace row read) instead of the
-  // 30-60s cold-fetch path below.
+  // ---- DB-backed snapshot lookup ----
+  // The snapshot is the SINGLE source of truth for "this URL has been
+  // fully processed". A fresh snapshot means we already ran homepage
+  // scrape + PageSpeed + GA4 + GSC + the lazy strategy regen + social
+  // handle detection. Hitting it = ~50ms total instead of 30-60s.
   const cached = await readCmoSlowCache({
     workspaceId: args.workspaceId,
     websiteUrl,
@@ -342,6 +343,9 @@ export async function loadCmoSlowData(args: {
   });
 
   if (cached) {
+    console.info(
+      `[cmo-cache] hit · workspace=${args.workspaceId} url=${websiteUrl}`
+    );
     liveSnapshot = cached.liveSnapshot;
     pageSpeed = cached.pageSpeed;
     // Honour current integration state — if the user disconnected GA4/GSC
@@ -349,6 +353,9 @@ export async function loadCmoSlowData(args: {
     gscData = gscConnected ? cached.gsc : null;
     ga4Data = ga4Connected ? cached.ga4 : null;
   } else {
+    console.info(
+      `[cmo-cache] miss · workspace=${args.workspaceId} url=${websiteUrl} — fetching fresh slow bundle`
+    );
     [liveSnapshot, pageSpeed, gscData, ga4Data] = await Promise.all([
       websiteUrl ? fetchPage(websiteUrl).catch(() => null) : Promise.resolve(null),
       withPageSpeed && websiteUrl
@@ -358,14 +365,18 @@ export async function loadCmoSlowData(args: {
       ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
     ]);
 
-    // Persist asynchronously — don't await, so the page render is never
-    // blocked on a DB write.
+    // AWAIT the write — previously fire-and-forget, which could race with
+    // a fast follow-up navigation. ~50ms cost on the cold path (already 30s)
+    // in exchange for guaranteed persistence on every cache miss.
     if (websiteUrl) {
-      void writeCmoSlowCache({
+      await writeCmoSlowCache({
         workspaceId: args.workspaceId,
         websiteUrl,
         data: { liveSnapshot, pageSpeed, gsc: gscData, ga4: ga4Data },
       });
+      console.info(
+        `[cmo-cache] persisted · workspace=${args.workspaceId} url=${websiteUrl}`
+      );
     }
   }
 
@@ -386,10 +397,16 @@ export async function loadCmoSlowData(args: {
   // profile yet (e.g. user just changed the site in Settings, which clears
   // voice + cached snapshot). Failures are non-fatal: we just leave voice
   // unset and the user can re-run agents manually.
+  //
+  // CRITICAL: skip when the slow snapshot is fresh. A fresh snapshot proves
+  // we already ran strategy regen for this URL inside the previous render —
+  // if voice still appears empty afterwards, the LLM call either failed or
+  // returned a thin result; re-running won't help and just burns 10-30s of
+  // Claude credits on every page visit.
   let freshVoice: CmoVoiceProfile | null = null;
   let freshIndustry: string | null = null;
   let freshIcp: string | null = null;
-  if (websiteUrl && isVoiceEmpty(voice ?? null)) {
+  if (!cached && websiteUrl && isVoiceEmpty(voice ?? null)) {
     try {
       const { strategy, snapshot } = await strategyPipeline.generate({
         workspaceId: args.workspaceId,
@@ -452,8 +469,11 @@ export async function loadCmoSlowData(args: {
     hasHandles &&
     !!brandRoot &&
     !handleValues.some((v) => v.toLowerCase().includes(brandRoot));
+  // Same cache-aware guard as strategy regen — fresh snapshot means handle
+  // detection already ran for this URL during the previous cold load, so
+  // skip it to keep tab-switching free.
   const shouldRunHandleDetect =
-    websiteUrl && (!hasHandles || handlesLookStale);
+    !cached && websiteUrl && (!hasHandles || handlesLookStale);
   // When we're about to refresh stale handles, drop the old ones so the in-memory
   // voice doesn't keep rendering the previous site's pills during this request.
   if (handlesLookStale && currentVoice) {
