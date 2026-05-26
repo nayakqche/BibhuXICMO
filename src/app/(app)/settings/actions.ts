@@ -1,13 +1,13 @@
 "use server";
 
 import { z } from "zod";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/backend/db";
 import { requireWorkspace } from "@/backend/workspace";
 import { normalizeUrl } from "@/backend/scraper/fetch";
 import { extractSocialHandles, type SocialHandles } from "@/backend/social-extractor";
-import type { CmoVoiceProfile } from "@/backend/agents/cmo-data";
+import { CMO_SLOW_TAG, type CmoVoiceProfile } from "@/backend/agents/cmo-data";
 
 const schema = z.object({
   name: z.string().min(1).max(100),
@@ -60,6 +60,10 @@ export async function updateWorkspaceAction(
   });
 
   if (urlChanged) {
+    // Drop the AI-CMO slow-data cache (homepage scrape, PageSpeed, GSC, GA4)
+    // so the panel doesn't keep rendering signals for the previous URL.
+    revalidateTag(CMO_SLOW_TAG);
+
     const { invalidateStaleHNDrafts } = await import("@/backend/agents/hn-stale");
     const { invalidateStaleXDrafts } = await import("@/backend/agents/x-stale");
     const { invalidateStaleIGDrafts } = await import(
