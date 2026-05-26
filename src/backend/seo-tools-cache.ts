@@ -1,26 +1,39 @@
 /**
- * DB-backed cache + dispatcher for the keyword tools.
+ * Async dispatcher + DB-backed cache for the SEO/GEO keyword tools.
  *
- * Apify is paid per result, so we cache aggressively: 24h default TTL,
- * keyed by (workspace, tool, normalized input hash). One row per tool
- * call lives in `SeoToolRun`.
+ * Why async: the Ahrefs Apify scraper often needs 60-90s to finish, and
+ * Render kills server-action HTTP requests at ~60s. So we:
  *
- * Lookup flow:
- *   1. Hash the input (keyword + country, or domain + keyword, etc.)
- *   2. Find the most-recent SeoToolRun for that (workspace, tool, hash)
- *   3. If newer than TTL, return cached result
- *   4. Otherwise run the Apify tool, persist, return
+ *   1. Start the Apify run synchronously (returns instantly).
+ *   2. Return {pending: true, runId, datasetId} to the client.
+ *   3. Client polls a generic pollSeoToolAction({tool, runId, ...args}).
+ *   4. When the run succeeds we fetch the dataset, normalize, persist to
+ *      `SeoToolRun`, and return data. Subsequent same-input requests hit
+ *      the 24h cache and return instantly.
  */
 import { createHash } from "crypto";
 import type { Prisma, SeoTool } from "@prisma/client";
 import { prisma } from "@/backend/db";
 import {
-  fetchKeywordDifficulty,
-  fetchKeywordMetrics,
-  fetchKeywordRank,
-  fetchSerpOverview,
-  fetchTopWebsites,
-  fetchAiVisibility,
+  ApifyNotConfiguredError,
+  ApifyAhrefsError,
+} from "@/backend/ahrefs";
+import {
+  getActorRunStatus,
+  getDatasetItems,
+  isTerminalApifyStatus,
+  startKeywordDifficulty,
+  startKeywordMetrics,
+  startKeywordRank,
+  startSerpOverview,
+  startTopWebsites,
+  startAiVisibility,
+  normalizeKeywordDifficulty,
+  normalizeKeywordMetrics,
+  normalizeKeywordRank,
+  normalizeSerpOverview,
+  normalizeTopWebsites,
+  normalizeAiVisibility,
   type KeywordDifficultyResult,
   type KeywordMetricsResult,
   type KeywordRankResult,
@@ -31,7 +44,29 @@ import {
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
-function hashInput(input: Record<string, unknown>): string {
+// --------------------------------------------------------------------------
+// Shared types
+// --------------------------------------------------------------------------
+
+export type CachedToolResult<T> =
+  | { ok: true; data: T; cachedAt: Date; fromCache: boolean }
+  | { ok: true; pending: true; runId: string; datasetId: string; message: string }
+  | { ok: false; error: string };
+
+/** Inputs supported by the unified poll action. */
+export type SeoToolPollInput =
+  | { tool: "KEYWORD_DIFFICULTY"; keyword: string; country: string; runId: string; datasetId: string }
+  | { tool: "KEYWORD_METRICS"; keyword: string; country: string; runId: string; datasetId: string }
+  | { tool: "KEYWORD_RANK"; domain: string; keyword: string; country: string; runId: string; datasetId: string }
+  | { tool: "SERP_OVERVIEW"; keyword: string; country: string; runId: string; datasetId: string }
+  | { tool: "TOP_WEBSITES"; country: string; category: string | null; runId: string; datasetId: string }
+  | { tool: "AI_VISIBILITY"; domain: string; country: string; runId: string; datasetId: string };
+
+// --------------------------------------------------------------------------
+// DB cache I/O
+// --------------------------------------------------------------------------
+
+export function hashInput(input: Record<string, unknown>): string {
   const stable = JSON.stringify(input, Object.keys(input).sort());
   return createHash("sha256").update(stable).digest("hex").slice(0, 32);
 }
@@ -57,7 +92,6 @@ async function readCached<T>(args: {
     return { result: row.result as T, cachedAt: row.createdAt };
   } catch (err) {
     const code = (err as { code?: string })?.code;
-    // Table doesn't exist yet (migration not run) — treat as cache miss.
     if (code === "P2021" || code === "P2022") return null;
     throw err;
   }
@@ -100,20 +134,39 @@ async function writeCached(args: {
   }
 }
 
-export type CachedToolResult<T> =
-  | { ok: true; data: T; cachedAt: Date; fromCache: boolean }
-  | { ok: false; error: string };
+// --------------------------------------------------------------------------
+// Start handlers — kick off Apify, return pending handle.
+// --------------------------------------------------------------------------
 
-// --------------------------------------------------------------------------
-// Public dispatchers — one per tool.
-// --------------------------------------------------------------------------
+function errorMessage(err: unknown): string {
+  if (!err) return "Unknown error";
+  if (err instanceof ApifyNotConfiguredError) {
+    return "Apify token isn't configured. Set APIFY_SEO_TOKEN (or APIFY_TOKEN) in Render → Environment to enable keyword tools.";
+  }
+  if (err instanceof ApifyAhrefsError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function normalizeDomainArg(input: string): string {
+  let s = input.trim().toLowerCase();
+  if (!s) return s;
+  s = s.replace(/^https?:\/\//, "").replace(/^www\./, "");
+  s = s.split("/")[0];
+  return s;
+}
+
+const PENDING_MSG = "Apify run started. Results usually arrive in 30-90 seconds.";
 
 export async function runKeywordDifficulty(args: {
   workspaceId: string;
   keyword: string;
   country?: string;
 }): Promise<CachedToolResult<KeywordDifficultyResult>> {
-  const input = { keyword: args.keyword.trim().toLowerCase(), country: (args.country ?? "us").toLowerCase() };
+  const input = {
+    keyword: args.keyword.trim().toLowerCase(),
+    country: (args.country ?? "us").toLowerCase(),
+  };
   if (!input.keyword) return { ok: false, error: "Enter a keyword." };
   const inputHash = hashInput({ ...input, tool: "KEYWORD_DIFFICULTY" });
 
@@ -126,15 +179,8 @@ export async function runKeywordDifficulty(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchKeywordDifficulty(input.keyword, input.country);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "KEYWORD_DIFFICULTY",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startKeywordDifficulty(input.keyword, input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
@@ -145,7 +191,10 @@ export async function runKeywordMetrics(args: {
   keyword: string;
   country?: string;
 }): Promise<CachedToolResult<KeywordMetricsResult>> {
-  const input = { keyword: args.keyword.trim().toLowerCase(), country: (args.country ?? "us").toLowerCase() };
+  const input = {
+    keyword: args.keyword.trim().toLowerCase(),
+    country: (args.country ?? "us").toLowerCase(),
+  };
   if (!input.keyword) return { ok: false, error: "Enter a keyword." };
   const inputHash = hashInput({ ...input, tool: "KEYWORD_METRICS" });
 
@@ -158,15 +207,8 @@ export async function runKeywordMetrics(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchKeywordMetrics(input.keyword, input.country);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "KEYWORD_METRICS",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startKeywordMetrics(input.keyword, input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
@@ -179,7 +221,7 @@ export async function runKeywordRank(args: {
   country?: string;
 }): Promise<CachedToolResult<KeywordRankResult>> {
   const input = {
-    domain: normalizeDomain(args.domain),
+    domain: normalizeDomainArg(args.domain),
     keyword: args.keyword.trim().toLowerCase(),
     country: (args.country ?? "us").toLowerCase(),
   };
@@ -196,15 +238,8 @@ export async function runKeywordRank(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchKeywordRank(input.domain, input.keyword, input.country);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "KEYWORD_RANK",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startKeywordRank(input.domain, input.keyword, input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
@@ -215,7 +250,10 @@ export async function runSerpOverview(args: {
   keyword: string;
   country?: string;
 }): Promise<CachedToolResult<SerpOverviewResult>> {
-  const input = { keyword: args.keyword.trim().toLowerCase(), country: (args.country ?? "us").toLowerCase() };
+  const input = {
+    keyword: args.keyword.trim().toLowerCase(),
+    country: (args.country ?? "us").toLowerCase(),
+  };
   if (!input.keyword) return { ok: false, error: "Enter a keyword." };
   const inputHash = hashInput({ ...input, tool: "SERP_OVERVIEW" });
 
@@ -228,15 +266,8 @@ export async function runSerpOverview(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchSerpOverview(input.keyword, input.country);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "SERP_OVERVIEW",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startSerpOverview(input.keyword, input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
@@ -262,15 +293,8 @@ export async function runTopWebsites(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchTopWebsites(input.country, input.category);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "TOP_WEBSITES",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startTopWebsites(input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
@@ -282,7 +306,7 @@ export async function runAiVisibility(args: {
   country?: string;
 }): Promise<CachedToolResult<AiVisibilityResult>> {
   const input = {
-    domain: normalizeDomain(args.domain),
+    domain: normalizeDomainArg(args.domain),
     country: (args.country ?? "us").toLowerCase(),
   };
   if (!input.domain) return { ok: false, error: "Enter a domain." };
@@ -297,38 +321,144 @@ export async function runAiVisibility(args: {
   if (cached) return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
 
   try {
-    const data = await fetchAiVisibility(input.domain, input.country);
-    await writeCached({
-      workspaceId: args.workspaceId,
-      tool: "AI_VISIBILITY",
-      inputHash,
-      input,
-      result: data,
-    });
-    return { ok: true, data, cachedAt: new Date(), fromCache: false };
+    const handle = await startAiVisibility(input.domain, input.country);
+    return { ok: true, pending: true, runId: handle.runId, datasetId: handle.datasetId, message: PENDING_MSG };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
 }
 
 // --------------------------------------------------------------------------
+// Unified poll — finishes whichever tool the client kicked off.
+// --------------------------------------------------------------------------
 
-function errorMessage(err: unknown): string {
-  if (!err) return "Unknown error";
-  if (err instanceof Error) {
-    // Normalize the most common Apify error to something actionable.
-    if (err.name === "ApifyNotConfiguredError") {
-      return "Apify token isn't configured. Set APIFY_SEO_TOKEN (or APIFY_TOKEN) in Render → Environment to enable keyword tools.";
-    }
-    return err.message;
+export type SeoToolPollResult =
+  | { ok: true; status: "RUNNING"; statusMessage?: string }
+  | { ok: true; status: "DONE"; data: KeywordDifficultyResult | KeywordMetricsResult | KeywordRankResult | SerpOverviewResult | TopWebsitesResult | AiVisibilityResult; cachedAt: Date }
+  | { ok: false; error: string };
+
+export async function pollSeoTool(
+  workspaceId: string,
+  input: SeoToolPollInput
+): Promise<SeoToolPollResult> {
+  let status: { status: string; statusMessage?: string; datasetId?: string };
+  try {
+    status = await getActorRunStatus(input.runId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
   }
-  return String(err);
-}
 
-function normalizeDomain(input: string): string {
-  let s = input.trim().toLowerCase();
-  if (!s) return s;
-  s = s.replace(/^https?:\/\//, "").replace(/^www\./, "");
-  s = s.split("/")[0];
-  return s;
+  if (!isTerminalApifyStatus(status.status)) {
+    return { ok: true, status: "RUNNING", statusMessage: status.statusMessage };
+  }
+  if (status.status !== "SUCCEEDED") {
+    return {
+      ok: false,
+      error: `Apify run ${status.status}${status.statusMessage ? ` — ${status.statusMessage}` : ""}`,
+    };
+  }
+
+  // SUCCEEDED — fetch + normalize per tool
+  let items: unknown[];
+  try {
+    items = await getDatasetItems(status.datasetId ?? input.datasetId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+
+  switch (input.tool) {
+    case "KEYWORD_DIFFICULTY": {
+      const data = normalizeKeywordDifficulty(items, {
+        keyword: input.keyword,
+        country: input.country,
+      });
+      const ih = hashInput({ keyword: input.keyword, country: input.country, tool: "KEYWORD_DIFFICULTY" });
+      await writeCached({
+        workspaceId,
+        tool: "KEYWORD_DIFFICULTY",
+        inputHash: ih,
+        input: { keyword: input.keyword, country: input.country },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+    case "KEYWORD_METRICS": {
+      const data = normalizeKeywordMetrics(items, {
+        keyword: input.keyword,
+        country: input.country,
+      });
+      const ih = hashInput({ keyword: input.keyword, country: input.country, tool: "KEYWORD_METRICS" });
+      await writeCached({
+        workspaceId,
+        tool: "KEYWORD_METRICS",
+        inputHash: ih,
+        input: { keyword: input.keyword, country: input.country },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+    case "KEYWORD_RANK": {
+      const data = normalizeKeywordRank(items, {
+        domain: input.domain,
+        keyword: input.keyword,
+        country: input.country,
+      });
+      const ih = hashInput({
+        domain: input.domain,
+        keyword: input.keyword,
+        country: input.country,
+        tool: "KEYWORD_RANK",
+      });
+      await writeCached({
+        workspaceId,
+        tool: "KEYWORD_RANK",
+        inputHash: ih,
+        input: { domain: input.domain, keyword: input.keyword, country: input.country },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+    case "SERP_OVERVIEW": {
+      const data = normalizeSerpOverview(items, {
+        keyword: input.keyword,
+        country: input.country,
+      });
+      const ih = hashInput({ keyword: input.keyword, country: input.country, tool: "SERP_OVERVIEW" });
+      await writeCached({
+        workspaceId,
+        tool: "SERP_OVERVIEW",
+        inputHash: ih,
+        input: { keyword: input.keyword, country: input.country },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+    case "TOP_WEBSITES": {
+      const data = normalizeTopWebsites(items, {
+        country: input.country,
+        category: input.category,
+      });
+      const ih = hashInput({ country: input.country, category: input.category, tool: "TOP_WEBSITES" });
+      await writeCached({
+        workspaceId,
+        tool: "TOP_WEBSITES",
+        inputHash: ih,
+        input: { country: input.country, category: input.category },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+    case "AI_VISIBILITY": {
+      const data = normalizeAiVisibility(items, { domain: input.domain });
+      const ih = hashInput({ domain: input.domain, country: input.country, tool: "AI_VISIBILITY" });
+      await writeCached({
+        workspaceId,
+        tool: "AI_VISIBILITY",
+        inputHash: ih,
+        input: { domain: input.domain, country: input.country },
+        result: data,
+      });
+      return { ok: true, status: "DONE", data, cachedAt: new Date() };
+    }
+  }
 }

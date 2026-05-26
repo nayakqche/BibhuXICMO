@@ -140,7 +140,7 @@ export type AiVisibilityResult = {
 // Apify call helper
 // --------------------------------------------------------------------------
 
-type AhrefsActorInput = {
+export type AhrefsActorInput = {
   url?: string;
   keyword?: string;
   country?: string;
@@ -157,22 +157,44 @@ type AhrefsActorInput = {
   include_top_websites?: boolean;
 };
 
-async function runActor(
-  input: AhrefsActorInput,
-  opts: { signal?: AbortSignal; timeoutMs?: number } = {}
-): Promise<unknown[]> {
+// --------------------------------------------------------------------------
+// Async Apify run + poll. We can't use run-sync-get-dataset-items because
+// the Ahrefs scraper often needs 60-90s and Render kills HTTP requests at
+// 60s. So we POST /runs, return the runId, and let the client poll for the
+// dataset.
+// --------------------------------------------------------------------------
+
+export type ApifyRunHandle = {
+  runId: string;
+  datasetId: string;
+  /** READY | RUNNING | SUCCEEDED | FAILED | ABORTED | TIMED-OUT */
+  status: string;
+};
+
+const TERMINAL_STATUSES = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "ABORTED",
+  "TIMED-OUT",
+]);
+
+export function isTerminalApifyStatus(status: string): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+/** POST to Apify /runs — returns instantly with the run handle. */
+export async function startActorRun(
+  input: AhrefsActorInput
+): Promise<ApifyRunHandle> {
   const token = seoApifyToken();
   if (!token) throw new ApifyNotConfiguredError();
   const actor = env.APIFY_AHREFS_ACTOR_ID;
   const url =
-    `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items` +
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/runs` +
     `?token=${encodeURIComponent(token)}`;
 
   const ctrl = new AbortController();
-  const externalAbort = () => ctrl.abort();
-  opts.signal?.addEventListener("abort", externalAbort);
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? SYNC_TIMEOUT_MS);
-
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -183,9 +205,7 @@ async function runActor(
     });
   } finally {
     clearTimeout(timer);
-    opts.signal?.removeEventListener("abort", externalAbort);
   }
-
   if (!res.ok) {
     let detail = "";
     try {
@@ -194,22 +214,117 @@ async function runActor(
       /* ignore */
     }
     throw new ApifyAhrefsError(
-      `Apify Ahrefs actor returned ${res.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`,
+      `Apify Ahrefs run start failed (${res.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`,
       res.status
     );
   }
-
-  let items: unknown;
-  try {
-    items = await res.json();
-  } catch (err) {
+  const json = (await res.json()) as {
+    data?: { id?: string; defaultDatasetId?: string; status?: string };
+  };
+  if (!json?.data?.id || !json.data.defaultDatasetId) {
     throw new ApifyAhrefsError(
-      `Failed to parse Apify response as JSON: ${(err as Error).message}`
+      `Apify response missing run id or dataset id: ${JSON.stringify(json).slice(0, 200)}`
     );
   }
+  return {
+    runId: json.data.id,
+    datasetId: json.data.defaultDatasetId,
+    status: json.data.status ?? "READY",
+  };
+}
+
+/** GET run metadata — cheap status check. */
+export async function getActorRunStatus(runId: string): Promise<{
+  status: string;
+  statusMessage?: string;
+  datasetId?: string;
+}> {
+  const token = seoApifyToken();
+  if (!token) throw new ApifyNotConfiguredError();
+  const url =
+    `https://api.apify.com/v2/actor-runs/${encodeURIComponent(runId)}` +
+    `?token=${encodeURIComponent(token)}`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    throw new ApifyAhrefsError(
+      `Apify run status fetch failed (${res.status})`,
+      res.status
+    );
+  }
+  const json = (await res.json()) as {
+    data?: { status?: string; statusMessage?: string; defaultDatasetId?: string };
+  };
+  return {
+    status: json.data?.status ?? "UNKNOWN",
+    statusMessage: json.data?.statusMessage,
+    datasetId: json.data?.defaultDatasetId,
+  };
+}
+
+/** GET dataset items for a finished run. */
+export async function getDatasetItems(datasetId: string): Promise<unknown[]> {
+  const token = seoApifyToken();
+  if (!token) throw new ApifyNotConfiguredError();
+  const url =
+    `https://api.apify.com/v2/datasets/${encodeURIComponent(datasetId)}/items` +
+    `?token=${encodeURIComponent(token)}&format=json&clean=true`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    throw new ApifyAhrefsError(
+      `Apify dataset fetch failed (${res.status})`,
+      res.status
+    );
+  }
+  const items = (await res.json()) as unknown;
   if (!Array.isArray(items)) return [];
   return items;
 }
+
+/**
+ * Combined start + short-poll for places that DO want a sync result and
+ * accept the timeout risk. Used by the AI Citation Check LLM probes which
+ * aren't Apify-backed; otherwise prefer startActorRun + the client poller.
+ */
+async function runActor(
+  input: AhrefsActorInput,
+  opts: { timeoutMs?: number } = {}
+): Promise<unknown[]> {
+  const handle = await startActorRun(input);
+  const deadline = Date.now() + (opts.timeoutMs ?? SYNC_TIMEOUT_MS);
+  let status = handle.status;
+  while (!isTerminalApifyStatus(status)) {
+    if (Date.now() > deadline) {
+      throw new ApifyAhrefsError(
+        `Apify run ${handle.runId} did not finish within ${opts.timeoutMs ?? SYNC_TIMEOUT_MS}ms`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+    const s = await getActorRunStatus(handle.runId);
+    status = s.status;
+  }
+  if (status !== "SUCCEEDED") {
+    throw new ApifyAhrefsError(`Apify run ${handle.runId} ended with status ${status}`);
+  }
+  return getDatasetItems(handle.datasetId);
+}
+// Silence "declared but never used" — kept as a future helper.
+void runActor;
 
 // --------------------------------------------------------------------------
 // Field-pickers — copied from ahrefs.ts so this file stays self-contained.
@@ -268,23 +383,27 @@ function hostnameOf(url: string): string {
 }
 
 // --------------------------------------------------------------------------
-// Tool 1 — Keyword Difficulty
+// Per-tool start handles + normalizers. The server action calls startX(...)
+// to launch the Apify run, then later calls normalizeX(items, params) to
+// turn the raw dataset rows into the public output shape.
 // --------------------------------------------------------------------------
-export async function fetchKeywordDifficulty(
-  keyword: string,
-  country = "us"
-): Promise<KeywordDifficultyResult> {
-  const items = await runActor({
-    keyword,
-    country,
-    include_keywords_difficulty: true,
-  });
+
+// Tool 1 — Keyword Difficulty
+export function startKeywordDifficulty(keyword: string, country = "us") {
+  return startActorRun({ keyword, country, include_keywords_difficulty: true });
+}
+export function normalizeKeywordDifficulty(
+  items: unknown[],
+  params: { keyword: string; country: string }
+): KeywordDifficultyResult {
   const o = findByType(items, "keywords_difficulty", "keyword_difficulty", "kd");
   const kd = o ? pickNumber(o, ["difficulty", "kd", "keyword_difficulty"]) : null;
-  const refdomains = o ? pickNumber(o, ["referring_domains_to_rank", "refdomainsToRank", "estimated_refdomains"]) : null;
+  const refdomains = o
+    ? pickNumber(o, ["referring_domains_to_rank", "refdomainsToRank", "estimated_refdomains"])
+    : null;
   return {
-    keyword,
-    country,
+    keyword: params.keyword,
+    country: params.country,
     difficulty: kd,
     label: difficultyLabel(kd),
     estimatedReferringDomainsToRank: refdomains,
@@ -292,26 +411,26 @@ export async function fetchKeywordDifficulty(
   };
 }
 
-// --------------------------------------------------------------------------
-// Tool 2 — Keyword Metrics (volume, KD, CPC, traffic potential)
-// --------------------------------------------------------------------------
-export async function fetchKeywordMetrics(
-  keyword: string,
-  country = "us"
-): Promise<KeywordMetricsResult> {
-  const items = await runActor({
+// Tool 2 — Keyword Metrics
+export function startKeywordMetrics(keyword: string, country = "us") {
+  return startActorRun({
     keyword,
     country,
     include_keywords: true,
     include_keywords_difficulty: true,
   });
+}
+export function normalizeKeywordMetrics(
+  items: unknown[],
+  params: { keyword: string; country: string }
+): KeywordMetricsResult {
   const o = findByType(items, "keywords", "keyword", "keyword_metrics");
   const related = o
     ? asArray(o.related_keywords).concat(asArray(o.suggestions)).slice(0, 10)
     : [];
   return {
-    keyword,
-    country,
+    keyword: params.keyword,
+    country: params.country,
     searchVolume: o ? pickNumber(o, ["volume", "searchVolume", "search_volume", "sv"]) : null,
     difficulty: o ? pickNumber(o, ["difficulty", "kd", "keyword_difficulty"]) : null,
     cpc: o ? pickNumber(o, ["cpc", "cost_per_click"]) : null,
@@ -319,35 +438,34 @@ export async function fetchKeywordMetrics(
       ? pickNumber(o, ["traffic_potential", "trafficPotential", "estimated_traffic"])
       : null,
     intent: o ? pickString(o, ["intent", "search_intent"]) : null,
-    related: related.map((row) => {
-      const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-      return {
-        keyword: pickString(r, ["keyword", "query"]) ?? "",
-        volume: pickNumber(r, ["volume", "searchVolume", "sv"]),
-        difficulty: pickNumber(r, ["difficulty", "kd"]),
-      };
-    }).filter((row) => row.keyword.length > 0),
+    related: related
+      .map((row) => {
+        const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+        return {
+          keyword: pickString(r, ["keyword", "query"]) ?? "",
+          volume: pickNumber(r, ["volume", "searchVolume", "sv"]),
+          difficulty: pickNumber(r, ["difficulty", "kd"]),
+        };
+      })
+      .filter((row) => row.keyword.length > 0),
     raw: items,
   };
 }
 
-// --------------------------------------------------------------------------
 // Tool 3 — Keyword Rank Checker
-// --------------------------------------------------------------------------
-export async function fetchKeywordRank(
-  domain: string,
-  keyword: string,
-  country = "us"
-): Promise<KeywordRankResult> {
-  const items = await runActor({
+export function startKeywordRank(domain: string, keyword: string, country = "us") {
+  return startActorRun({
     url: domain,
     keyword,
     country,
     include_keywords_ranking: true,
   });
+}
+export function normalizeKeywordRank(
+  items: unknown[],
+  params: { domain: string; keyword: string; country: string }
+): KeywordRankResult {
   const o = findByType(items, "keywords_ranking", "ranking", "rank");
-
-  // Some builds return an array of (keyword, position) pairs we have to scan.
   let position: number | null = null;
   let url: string | null = null;
   let serpFeature: string | null = null;
@@ -355,13 +473,12 @@ export async function fetchKeywordRank(
     position = pickNumber(o, ["position", "rank", "pos"]);
     url = pickString(o, ["url", "ranking_url"]);
     serpFeature = pickString(o, ["serp_feature", "feature"]);
-
     if (position === null) {
       const rows = asArray(o.rankings).concat(asArray(o.results));
       const match = rows.find((r) => {
         if (!r || typeof r !== "object") return false;
         const v = (r as Record<string, unknown>).keyword;
-        return typeof v === "string" && v.toLowerCase() === keyword.toLowerCase();
+        return typeof v === "string" && v.toLowerCase() === params.keyword.toLowerCase();
       });
       if (match && typeof match === "object") {
         const m = match as Record<string, unknown>;
@@ -371,62 +488,72 @@ export async function fetchKeywordRank(
       }
     }
   }
-  return { domain, keyword, country, position, url, serpFeature, raw: items };
+  return {
+    domain: params.domain,
+    keyword: params.keyword,
+    country: params.country,
+    position,
+    url,
+    serpFeature,
+    raw: items,
+  };
 }
 
-// --------------------------------------------------------------------------
-// Tool 4 — SERP Overview (top-10 analysis)
-// --------------------------------------------------------------------------
-export async function fetchSerpOverview(
-  keyword: string,
-  country = "us"
-): Promise<SerpOverviewResult> {
-  const items = await runActor({
-    keyword,
-    country,
-    include_serp: true,
-  });
+// Tool 4 — SERP Overview
+export function startSerpOverview(keyword: string, country = "us") {
+  return startActorRun({ keyword, country, include_serp: true });
+}
+export function normalizeSerpOverview(
+  items: unknown[],
+  params: { keyword: string; country: string }
+): SerpOverviewResult {
   const o = findByType(items, "serp", "serp_overview", "search_results");
-  const rawResults = o ? asArray(o.results).concat(asArray(o.serp_results)).concat(asArray(o.organic)) : [];
+  const rawResults = o
+    ? asArray(o.results).concat(asArray(o.serp_results)).concat(asArray(o.organic))
+    : [];
   const features = o ? asArray(o.features).concat(asArray(o.serp_features)) : [];
 
-  const results: SerpEntry[] = rawResults.slice(0, 10).map((row, i) => {
-    const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-    const link = pickString(r, ["url", "link"]) ?? "";
-    return {
-      position: pickNumber(r, ["position", "rank", "pos"]) ?? i + 1,
-      title: pickString(r, ["title", "name"]) ?? link,
-      url: link,
-      domain: link ? hostnameOf(link) : "",
-      snippet: pickString(r, ["snippet", "description"]),
-      domainRating: pickNumber(r, ["domain_rating", "dr", "domainRating"]),
-      traffic: pickNumber(r, ["traffic", "monthly_traffic"]),
-    };
-  }).filter((row) => row.url.length > 0);
+  const results: SerpEntry[] = rawResults
+    .slice(0, 10)
+    .map((row, i) => {
+      const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+      const link = pickString(r, ["url", "link"]) ?? "";
+      return {
+        position: pickNumber(r, ["position", "rank", "pos"]) ?? i + 1,
+        title: pickString(r, ["title", "name"]) ?? link,
+        url: link,
+        domain: link ? hostnameOf(link) : "",
+        snippet: pickString(r, ["snippet", "description"]),
+        domainRating: pickNumber(r, ["domain_rating", "dr", "domainRating"]),
+        traffic: pickNumber(r, ["traffic", "monthly_traffic"]),
+      };
+    })
+    .filter((row) => row.url.length > 0);
 
   return {
-    keyword,
-    country,
+    keyword: params.keyword,
+    country: params.country,
     results,
     features: features
-      .map((f) => (typeof f === "string" ? f : pickString(f as Record<string, unknown>, ["name", "type"]) ?? ""))
+      .map((f) =>
+        typeof f === "string"
+          ? f
+          : pickString(f as Record<string, unknown>, ["name", "type"]) ?? ""
+      )
       .filter((s): s is string => !!s)
       .slice(0, 8),
     raw: items,
   };
 }
 
-// --------------------------------------------------------------------------
-// Tool 5 — Top Websites (ahrefstop-style trending list)
-// --------------------------------------------------------------------------
-export async function fetchTopWebsites(
-  country = "us",
-  category: string | null = null
-): Promise<TopWebsitesResult> {
-  const items = await runActor({
-    country,
-    include_top_websites: true,
-  });
+// Tool 5 — Top Websites
+export function startTopWebsites(country = "us") {
+  return startActorRun({ country, include_top_websites: true });
+}
+export function normalizeTopWebsites(
+  items: unknown[],
+  params: { country: string; category: string | null }
+): TopWebsitesResult {
   const o = findByType(items, "top_websites", "topWebsites", "websites");
   const rows = o
     ? asArray(o.websites).concat(asArray(o.top_websites)).concat(asArray(o.results))
@@ -449,46 +576,55 @@ export async function fetchTopWebsites(
     })
     .filter((row): row is TopWebsiteEntry => row !== null)
     .filter((row) =>
-      !category ? true : (row.category ?? "").toLowerCase().includes(category.toLowerCase())
+      !params.category
+        ? true
+        : (row.category ?? "").toLowerCase().includes(params.category.toLowerCase())
     );
 
-  return { country, category, entries, raw: items };
+  return {
+    country: params.country,
+    category: params.category,
+    entries,
+    raw: items,
+  };
 }
 
-// --------------------------------------------------------------------------
-// GEO tool — AI Visibility (share-of-voice in AI answers)
-// --------------------------------------------------------------------------
-export async function fetchAiVisibility(
-  domain: string,
-  country = "us"
-): Promise<AiVisibilityResult> {
-  const items = await runActor({
-    url: domain,
-    country,
-    include_ai_visibility: true,
-  });
+// GEO Tool — AI Visibility
+export function startAiVisibility(domain: string, country = "us") {
+  return startActorRun({ url: domain, country, include_ai_visibility: true });
+}
+export function normalizeAiVisibility(
+  items: unknown[],
+  params: { domain: string }
+): AiVisibilityResult {
   const o = findByType(items, "ai_visibility", "aiVisibility", "ai");
   const providers = o ? asArray(o.by_provider).concat(asArray(o.providers)) : [];
   const queries = o ? asArray(o.top_queries).concat(asArray(o.queries)) : [];
   return {
-    domain,
+    domain: params.domain,
     score: o ? pickNumber(o, ["score", "ai_visibility_score", "aiv"]) : null,
     mentions: o ? pickNumber(o, ["mentions", "total_mentions"]) : null,
-    byProvider: providers.map((row) => {
-      const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-      return {
-        provider: pickString(r, ["provider", "name"]) ?? "",
-        score: pickNumber(r, ["score", "ai_visibility_score"]),
-        mentions: pickNumber(r, ["mentions", "count"]),
-      };
-    }).filter((row) => row.provider.length > 0).slice(0, 6),
-    topQueries: queries.map((row) => {
-      const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-      return {
-        query: pickString(r, ["query", "prompt", "keyword"]) ?? "",
-        mentions: pickNumber(r, ["mentions", "count"]),
-      };
-    }).filter((row) => row.query.length > 0).slice(0, 10),
+    byProvider: providers
+      .map((row) => {
+        const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+        return {
+          provider: pickString(r, ["provider", "name"]) ?? "",
+          score: pickNumber(r, ["score", "ai_visibility_score"]),
+          mentions: pickNumber(r, ["mentions", "count"]),
+        };
+      })
+      .filter((row) => row.provider.length > 0)
+      .slice(0, 6),
+    topQueries: queries
+      .map((row) => {
+        const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+        return {
+          query: pickString(r, ["query", "prompt", "keyword"]) ?? "",
+          mentions: pickNumber(r, ["mentions", "count"]),
+        };
+      })
+      .filter((row) => row.query.length > 0)
+      .slice(0, 10),
     raw: items,
   };
 }

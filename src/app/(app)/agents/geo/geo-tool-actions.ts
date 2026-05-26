@@ -26,7 +26,7 @@ import type {
 } from "@/backend/ahrefs-tools";
 
 // --------------------------------------------------------------------------
-// 1) AI Visibility — Apify-backed (share of voice in AI answers)
+// 1) AI Visibility — Apify (async, may return pending)
 // --------------------------------------------------------------------------
 export async function runAiVisibilityAction(args: {
   domain: string;
@@ -34,13 +34,12 @@ export async function runAiVisibilityAction(args: {
 }): Promise<CachedToolResult<AiVisibilityResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runAiVisibility({ workspaceId: workspace.id, ...args });
-  if (res.ok) revalidatePath("/agents/geo");
+  if ("ok" in res && res.ok && !("pending" in res)) revalidatePath("/agents/geo");
   return res;
 }
 
 // --------------------------------------------------------------------------
-// 2) AI Metrics — proxies the Apify keyword-metrics call so we can highlight
-//    AIO-relevant signals (volume + intent + traffic potential).
+// 2) AI Metrics — Apify keyword metrics (async)
 // --------------------------------------------------------------------------
 export async function runAiMetricsAction(args: {
   keyword: string;
@@ -48,14 +47,12 @@ export async function runAiMetricsAction(args: {
 }): Promise<CachedToolResult<KeywordMetricsResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runKeywordMetrics({ workspaceId: workspace.id, ...args });
-  if (res.ok) revalidatePath("/agents/geo");
+  if ("ok" in res && res.ok && !("pending" in res)) revalidatePath("/agents/geo");
   return res;
 }
 
 // --------------------------------------------------------------------------
-// 3) AI Overview — runs the SERP overview Apify call. The UI reads
-//    `result.features` to surface "AI Overview" / "Featured snippet" /
-//    "People also ask" tags + top sources cited inside the AIO.
+// 3) AI Overview — Apify SERP (async)
 // --------------------------------------------------------------------------
 export async function runAiOverviewAction(args: {
   keyword: string;
@@ -63,14 +60,12 @@ export async function runAiOverviewAction(args: {
 }): Promise<CachedToolResult<SerpOverviewResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runSerpOverview({ workspaceId: workspace.id, ...args });
-  if (res.ok) revalidatePath("/agents/geo");
+  if ("ok" in res && res.ok && !("pending" in res)) revalidatePath("/agents/geo");
   return res;
 }
 
 // --------------------------------------------------------------------------
-// 4) Top AI-cited Sites — proxies the Apify top-websites call. For now it
-//    surfaces the most-trafficked sites by country/category. Once the actor
-//    surfaces an AI-citation-share field we'll swap to that.
+// 4) Top AI-cited Sites — Apify (async)
 // --------------------------------------------------------------------------
 export async function runTopAiCitedAction(args: {
   country?: string;
@@ -78,15 +73,12 @@ export async function runTopAiCitedAction(args: {
 }): Promise<CachedToolResult<TopWebsitesResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runTopWebsites({ workspaceId: workspace.id, ...args });
-  if (res.ok) revalidatePath("/agents/geo");
+  if ("ok" in res && res.ok && !("pending" in res)) revalidatePath("/agents/geo");
   return res;
 }
 
 // --------------------------------------------------------------------------
-// 5) AI Citation Check — LLM-driven probe. Given (domain, query), ask each
-//    available LLM provider whether a well-formed answer to the query would
-//    cite the domain. Stored in `SeoToolRun` as AI_CITATION_CHECK so it
-//    benefits from the same 24h cache + display infra as the other tools.
+// 5) AI Citation Check — LLM-driven (synchronous, finishes in <30s)
 // --------------------------------------------------------------------------
 const citationProbeSchema = z.object({
   cited: z.boolean(),
@@ -105,7 +97,6 @@ export type AiCitationCheckResult = {
     summary: string;
     competitors: string[];
   }>;
-  /** 0–100. % of providers that cited the domain. */
   citationScore: number;
 };
 
@@ -184,10 +175,14 @@ async function writeCachedCitation(args: {
   }
 }
 
+export type CitationCheckResult =
+  | { ok: true; data: AiCitationCheckResult; cachedAt: Date; fromCache: boolean }
+  | { ok: false; error: string };
+
 export async function runAiCitationCheckAction(args: {
   domain: string;
   query: string;
-}): Promise<CachedToolResult<AiCitationCheckResult>> {
+}): Promise<CitationCheckResult> {
   const { workspace } = await requireWorkspace();
 
   const input = {
