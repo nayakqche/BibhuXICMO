@@ -193,7 +193,7 @@ function AnalyticsSkeleton() {
           </div>
           <p className="text-[11px] text-muted-foreground/80">
             Scraping homepage · running Google Lighthouse · fetching Ahrefs (DR, traffic, keywords) · running Claude strategy analysis.
-            Results are cached for 24h so the next load is instant.
+            Results are cached: homepage 1h, PageSpeed 6h, GA4 + GSC 30 min — every other navigation is instant.
           </p>
         </div>
       </CardHeader>

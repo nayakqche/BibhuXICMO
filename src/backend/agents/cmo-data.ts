@@ -7,6 +7,7 @@
  *     (1-15s). Streamed in via React Suspense so the shell renders instantly.
  */
 import { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/backend/db";
 import { fetchPage, type PageSnapshot } from "@/backend/scraper/fetch";
 import { fetchPageSpeed, type PageSpeedResult } from "@/backend/pagespeed";
@@ -33,6 +34,51 @@ import { pickAvailableModel } from "@/backend/llm";
 export type { CmoLlmAnalysis };
 
 const CMO_LLM_CACHE_MS = 24 * 60 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Cached wrappers for the expensive slow-data fetches.
+//
+// Without these, every tab switch / dashboard ↔ CMO navigation triggered a
+// fresh homepage scrape + PageSpeed call + GSC/GA4 query — that's the
+// "Loading site signals (typically 30-60s)" spinner re-appearing every time.
+//
+// `unstable_cache` keys by the function args, so each (workspaceId, url)
+// pair gets its own cached entry. We invalidate via `revalidateTag` from
+// settings/actions.ts when the user changes their website URL — no other
+// path causes the data to go stale meaningfully within a single TTL window.
+// ---------------------------------------------------------------------------
+export const CMO_SLOW_TAG = "cmo-slow";
+
+const ONE_HOUR = 60 * 60;
+const SIX_HOURS = 6 * 60 * 60;
+const THIRTY_MIN = 30 * 60;
+
+const cachedFetchPage = unstable_cache(
+  async (_workspaceId: string, url: string) => fetchPage(url),
+  ["cmo-fetch-page"],
+  { revalidate: ONE_HOUR, tags: [CMO_SLOW_TAG] }
+);
+
+const cachedFetchPageSpeed = unstable_cache(
+  async (_workspaceId: string, url: string) => fetchPageSpeed(url),
+  ["cmo-page-speed"],
+  // PageSpeed scores barely move hour-to-hour — 6h is a sweet spot between
+  // quota savings and freshness. The Google PSI API also has a strict daily
+  // quota; caching here is a hard requirement for free-tier projects.
+  { revalidate: SIX_HOURS, tags: [CMO_SLOW_TAG] }
+);
+
+const cachedLoadGsc = unstable_cache(
+  async (workspaceId: string) => loadGsc(workspaceId),
+  ["cmo-gsc"],
+  { revalidate: THIRTY_MIN, tags: [CMO_SLOW_TAG] }
+);
+
+const cachedLoadGa4 = unstable_cache(
+  async (workspaceId: string) => loadGa4(workspaceId),
+  ["cmo-ga4"],
+  { revalidate: THIRTY_MIN, tags: [CMO_SLOW_TAG] }
+);
 
 export type CmoVoiceProfile = {
   positioning?: string;
@@ -309,12 +355,14 @@ export async function loadCmoSlowData(args: {
   } = args;
 
   const [liveSnapshot, pageSpeed, gscData, ga4Data, ahrefs] = await Promise.all([
-    websiteUrl ? fetchPage(websiteUrl).catch(() => null) : Promise.resolve(null),
-    withPageSpeed && websiteUrl
-      ? fetchPageSpeed(websiteUrl).catch(() => null)
+    websiteUrl
+      ? cachedFetchPage(args.workspaceId, websiteUrl).catch(() => null)
       : Promise.resolve(null),
-    gscConnected ? loadGsc(args.workspaceId) : Promise.resolve(null),
-    ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
+    withPageSpeed && websiteUrl
+      ? cachedFetchPageSpeed(args.workspaceId, websiteUrl).catch(() => null)
+      : Promise.resolve(null),
+    gscConnected ? cachedLoadGsc(args.workspaceId) : Promise.resolve(null),
+    ga4Connected ? cachedLoadGa4(args.workspaceId) : Promise.resolve(null),
     loadAhrefsWithCache({
       workspaceId: args.workspaceId,
       websiteUrl,

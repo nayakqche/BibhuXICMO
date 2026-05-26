@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -11,10 +12,13 @@ import {
   Globe,
   Image as ImageIcon,
   Link2,
+  Loader2,
+  RefreshCw,
   Search,
   Sparkles,
   TrendingUp,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -27,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import type { CmoData } from "@/backend/agents/cmo-data";
 import type { LighthouseScores } from "@/backend/pagespeed";
+import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 
 function heuristicToLighthouse(
   h: NonNullable<CmoData["llmAnalysis"]>["heuristicLighthouse"]
@@ -72,14 +77,23 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Activity className="h-4 w-4 text-primary" aria-hidden />
-          Analytics
-          <span className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
-        </CardTitle>
-        <CardDescription>
-          On-page signals, performance scores, and AI/GEO presence.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Activity className="h-4 w-4 text-primary" aria-hidden />
+              Analytics
+              <span
+                className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-400"
+                aria-hidden
+              />
+            </CardTitle>
+            <CardDescription className="mt-1">
+              On-page signals, performance scores, and AI/GEO presence. Data is
+              cached locally — hit refresh after redeploys.
+            </CardDescription>
+          </div>
+          <RefreshButton />
+        </div>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
         <ConnectGoogleRow ga4={data.integrations.ga4} gsc={data.integrations.gsc} />
@@ -121,6 +135,37 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
         </Tabs>
       </CardContent>
     </Card>
+  );
+}
+
+function RefreshButton() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          await refreshCmoSlowDataAction();
+          router.refresh();
+          toast.message("Refreshing site signals", {
+            description: "Pulling fresh homepage scrape, PageSpeed, GA4 + GSC…",
+            duration: 4000,
+          });
+        })
+      }
+      title="Bypass the cache and re-fetch homepage, PageSpeed, GA4 + GSC"
+    >
+      {pending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className="h-3.5 w-3.5" />
+      )}
+      Refresh
+    </Button>
   );
 }
 
