@@ -129,8 +129,18 @@ export type AiVisibilityResult = {
   score: number | null;
   /** Mention count across all probed LLMs in the last 30d. */
   mentions: number | null;
-  /** Per-provider breakdown surfaced by the actor when available. */
-  byProvider: Array<{ provider: string; score: number | null; mentions: number | null }>;
+  /**
+   * Per-provider breakdown surfaced by the actor when available.
+   * `citations` = total mentions/citations from that provider.
+   * `pages` = unique URLs on the domain that were cited.
+   */
+  byProvider: Array<{
+    provider: string;
+    score: number | null;
+    mentions: number | null;
+    citations: number | null;
+    pages: number | null;
+  }>;
   /** Top queries the domain is cited for. */
   topQueries: Array<{ query: string; mentions: number | null }>;
   raw: unknown;
@@ -608,13 +618,15 @@ export function normalizeAiVisibility(
       .map((row) => {
         const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
         return {
-          provider: pickString(r, ["provider", "name"]) ?? "",
+          provider: pickString(r, ["provider", "name", "platform"]) ?? "",
           score: pickNumber(r, ["score", "ai_visibility_score"]),
           mentions: pickNumber(r, ["mentions", "count"]),
+          citations: pickNumber(r, ["citations", "citation_count", "mentions", "count"]),
+          pages: pickNumber(r, ["pages", "page_count", "unique_pages", "urls"]),
         };
       })
       .filter((row) => row.provider.length > 0)
-      .slice(0, 6),
+      .slice(0, 8),
     topQueries: queries
       .map((row) => {
         const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;

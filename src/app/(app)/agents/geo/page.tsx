@@ -3,35 +3,89 @@ import { Sparkles, Check, X } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import { hasSeoApifyToken } from "@/backend/ahrefs-tools";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { RunAgentButton } from "@/frontend/components/app/run-agent-button";
 import { GeoTools } from "./geo-tools";
+import { AiCitationsPanel } from "./ai-citations-panel";
+import {
+  PLATFORMS,
+  type AiCitationsBundle,
+  type PlatformKey,
+  type PlatformCounts,
+} from "./ai-citations-types";
 
 export const metadata = { title: "GEO Agent" };
 
+function normalizeDomain(input: string | null | undefined): string {
+  if (!input) return "";
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0];
+}
+
+async function loadInitialBundle(
+  workspaceId: string,
+  domain: string
+): Promise<AiCitationsBundle | null> {
+  if (!domain) return null;
+  try {
+    const snaps = await prisma.aiCitationSnapshot.findMany({
+      where: { workspaceId, domain },
+      orderBy: { fetchedAt: "desc" },
+      take: 2,
+    });
+    if (snaps.length === 0) return null;
+    const [latest, prev] = snaps;
+    return {
+      domain,
+      country: latest.country,
+      fetchedAt: latest.fetchedAt.toISOString(),
+      previousAt: prev?.fetchedAt.toISOString() ?? null,
+      current: (latest.data as Partial<Record<PlatformKey, PlatformCounts>>) ?? {},
+      previous: prev
+        ? (prev.data as Partial<Record<PlatformKey, PlatformCounts>>) ?? {}
+        : {},
+    };
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "P2021" || code === "P2022") return null;
+    throw err;
+  }
+}
+
 export default async function GeoAgentPage() {
   const { workspace } = await requireWorkspace();
+  const domain = normalizeDomain(workspace.websiteUrl);
 
-  const [snapshots, recentProbes] = await Promise.all([
-    prisma.geoScoreSnapshot.findMany({
-      where: { workspaceId: workspace.id },
-      orderBy: { date: "desc" },
-      take: 12,
-    }),
+  const [recentProbes, citationsBundle] = await Promise.all([
     prisma.geoQuery.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { checkedAt: "desc" },
       take: 25,
     }),
+    loadInitialBundle(workspace.id, domain),
   ]);
 
-  const latest = snapshots[0];
-  const prev = snapshots[1];
-  const delta = latest && prev ? latest.score - prev.score : 0;
+  // Quick header stat — total citations across all platforms today.
+  const totalCitations = citationsBundle
+    ? PLATFORMS.reduce(
+        (acc, p) => acc + (citationsBundle.current[p.key]?.citations ?? 0),
+        0
+      )
+    : 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -39,93 +93,45 @@ export default async function GeoAgentPage() {
             <h1 className="text-3xl font-semibold tracking-tight">GEO Agent</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Measures how often ChatGPT, Claude, and Perplexity cite your brand.
+            Track citations from AI Overviews, ChatGPT, Gemini, Perplexity, Copilot, and Grok.
+            {totalCitations > 0 && (
+              <>
+                {" "}
+                <span className="font-medium text-foreground">
+                  {totalCitations.toLocaleString()}
+                </span>{" "}
+                total citations in the latest snapshot.
+              </>
+            )}
           </p>
         </div>
         <RunAgentButton agentId="geo" label="Run GEO check" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-xs text-muted-foreground">Current GEO score</div>
-            <div className="mt-2 flex items-baseline gap-3">
-              <span className="text-4xl font-bold">{latest?.score ?? "—"}</span>
-              {delta !== 0 && (
-                <span
-                  className={
-                    delta > 0
-                      ? "text-sm text-emerald-600 dark:text-emerald-400"
-                      : "text-sm text-destructive"
-                  }
-                >
-                  {delta > 0 ? "+" : ""}
-                  {delta} vs last
-                </span>
-              )}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {latest ? format(latest.date, "MMM d, yyyy") : "Run a check to populate"}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-xs text-muted-foreground">Probes this run</div>
-            <div className="mt-2 text-4xl font-bold">
-              {recentProbes.length}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              Across OpenAI and Anthropic
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-xs text-muted-foreground">Cited rate</div>
-            <div className="mt-2 text-4xl font-bold">
-              {recentProbes.length > 0
-                ? `${Math.round(
-                    (recentProbes.filter((p) => p.cited).length /
-                      recentProbes.length) *
-                      100
-                  )}%`
-                : "—"}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              Latest {recentProbes.length} probes
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <AiCitationsPanel initial={citationsBundle} domain={domain} />
 
       <GeoTools
-        defaultDomain={(workspace.websiteUrl ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]}
+        defaultDomain={domain}
         hasApifyToken={hasSeoApifyToken()}
       />
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent probes</CardTitle>
+          <CardTitle>Recent LLM probes</CardTitle>
           <CardDescription>
-            Every prompt, every provider, with whether your brand was cited.
+            Manual citation checks from the GEO Tools → Citation Check tab.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {recentProbes.length === 0 ? (
             <p className="rounded-md border border-dashed py-12 text-center text-sm text-muted-foreground">
-              No probes yet. Click &quot;Run GEO check&quot; to measure your AI
-              search visibility.
+              No probes yet. Open <span className="font-medium">GEO Tools → Citation Check</span> to
+              probe LLMs for any query.
             </p>
           ) : (
             <ul className="space-y-2">
               {recentProbes.map((p) => (
-                <li
-                  key={p.id}
-                  className="rounded-lg border p-3 text-sm"
-                >
+                <li key={p.id} className="rounded-lg border p-3 text-sm">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">

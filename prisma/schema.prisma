@@ -119,6 +119,7 @@ model Workspace {
   igCampaigns      IGCampaign[]
   ytCreators       YTCreator[]
   seoToolRuns      SeoToolRun[]
+  aiCitations      AiCitationSnapshot[]
   igNegotiations   IGNegotiation[]
   contentDrafts    ContentDraft[]
   actionItems      ActionItem[]
@@ -302,6 +303,37 @@ model SeoToolRun {
 
   @@unique([workspaceId, tool, inputHash])
   @@index([workspaceId, tool, createdAt])
+}
+
+// --------------------------------------------------------------------------
+// AI Citations dashboard — per-platform citation + page counts for the
+// workspace domain. One row per successful Apify ai_visibility run. We keep
+// history (no upsert) so the UI can compute "delta vs previous run".
+// --------------------------------------------------------------------------
+model AiCitationSnapshot {
+  id          String   @id @default(cuid())
+  workspaceId String
+  domain      String
+  country     String   @default("us")
+  fetchedAt   DateTime @default(now())
+  /**
+   * Per-platform counts:
+   * {
+   *   aiOverviews?: { citations, pages },
+   *   chatgpt?:     { citations, pages },
+   *   gemini?:      { citations, pages },
+   *   perplexity?:  { citations, pages },
+   *   copilot?:     { citations, pages },
+   *   grok?:        { citations, pages },
+   * }
+   */
+  data        Json
+  /** Raw dataset items returned by the Apify actor (for debugging). */
+  raw         Json?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, domain, fetchedAt])
 }
 
 // ===========================================================================
