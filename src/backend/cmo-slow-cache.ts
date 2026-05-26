@@ -122,13 +122,34 @@ export async function readCmoSlowCache(args: {
 
   const raw = row?.cmoSlowSnapshot;
   const at = row?.cmoSlowSnapshotAt;
-  if (!raw || !isSnapshotV1(raw) || !at) return null;
-
-  if (normUrl(raw.url) !== normUrl(args.websiteUrl)) return null;
-
+  if (!raw || !at) {
+    console.info(
+      `[cmo-cache] read · empty snapshot (workspace=${args.workspaceId})`
+    );
+    return null;
+  }
+  if (!isSnapshotV1(raw)) {
+    console.warn(
+      `[cmo-cache] read · stored shape isn't v1 (workspace=${args.workspaceId}); ignoring`
+    );
+    return null;
+  }
+  if (normUrl(raw.url) !== normUrl(args.websiteUrl)) {
+    console.info(
+      `[cmo-cache] read · URL mismatch (snapshot=${raw.url} current=${args.websiteUrl}) — refetching`
+    );
+    return null;
+  }
   const age = Date.now() - at.getTime();
-  if (age > ttl) return null;
-
+  if (age > ttl) {
+    console.info(
+      `[cmo-cache] read · expired (${Math.round(age / 1000)}s > ${Math.round(ttl / 1000)}s) — refetching`
+    );
+    return null;
+  }
+  console.info(
+    `[cmo-cache] read · fresh (${Math.round(age / 1000)}s old, ttl ${Math.round(ttl / 1000)}s)`
+  );
   return {
     liveSnapshot: raw.liveSnapshot,
     pageSpeed: raw.pageSpeed,
@@ -165,10 +186,17 @@ export async function writeCmoSlowCache(args: {
         cmoSlowSnapshotAt: new Date(),
       },
     });
+    console.info(
+      `[cmo-cache] write · persisted (workspace=${args.workspaceId} url=${args.websiteUrl})`
+    );
   } catch (err) {
     const code = (err as { code?: string })?.code;
-    if (code !== "P2022") {
-      console.error("[cmo] failed to persist slow snapshot:", err);
+    if (code === "P2022") {
+      console.warn(
+        "[cmo-cache] write · column missing (P2022) — Render `prisma db push` hasn't run yet. Snapshot WILL NOT persist. Re-deploy or run `npx prisma db push` once the build settles."
+      );
+    } else {
+      console.error("[cmo-cache] write · failed:", err);
     }
   }
 }
