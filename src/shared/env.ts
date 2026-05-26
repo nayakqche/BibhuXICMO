@@ -67,6 +67,14 @@ const envSchema = z.object({
    */
   APIFY_X_TOKEN: z.string().optional(),
   /**
+   * Optional dedicated Apify token for the SEO + GEO keyword tools
+   * (Keyword Difficulty, Metrics, Rank, SERP Overview, Top Websites, AI
+   * Visibility, AI Overview, Top AI-cited). If set, those tools bill
+   * against this account instead of APIFY_TOKEN. Falls back to APIFY_TOKEN
+   * when unset.
+   */
+  APIFY_SEO_TOKEN: z.string().optional(),
+  /**
    * Apify actor id that returns Ahrefs-style site data (domain rating,
    * backlinks, organic traffic, top keywords). Defaults to the
    * `radeance/ahrefs-scraper` actor; override to swap providers.
