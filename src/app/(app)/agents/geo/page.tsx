@@ -2,9 +2,11 @@ import { format } from "date-fns";
 import { Sparkles, Check, X } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
+import { env } from "@/shared/env";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { RunAgentButton } from "@/frontend/components/app/run-agent-button";
+import { GeoTools } from "./geo-tools";
 
 export const metadata = { title: "GEO Agent" };
 
@@ -98,6 +100,11 @@ export default async function GeoAgentPage() {
           </CardContent>
         </Card>
       </div>
+
+      <GeoTools
+        defaultDomain={(workspace.websiteUrl ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]}
+        hasApifyToken={!!env.APIFY_TOKEN}
+      />
 
       <Card>
         <CardHeader>
