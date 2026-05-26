@@ -2,7 +2,7 @@ import { format } from "date-fns";
 import { Sparkles, Check, X } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
-import { env } from "@/shared/env";
+import { hasSeoApifyToken } from "@/backend/ahrefs-tools";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { RunAgentButton } from "@/frontend/components/app/run-agent-button";
@@ -103,7 +103,7 @@ export default async function GeoAgentPage() {
 
       <GeoTools
         defaultDomain={(workspace.websiteUrl ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]}
-        hasApifyToken={!!env.APIFY_TOKEN}
+        hasApifyToken={hasSeoApifyToken()}
       />
 
       <Card>

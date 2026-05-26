@@ -318,7 +318,7 @@ function errorMessage(err: unknown): string {
   if (err instanceof Error) {
     // Normalize the most common Apify error to something actionable.
     if (err.name === "ApifyNotConfiguredError") {
-      return "Apify token isn't configured. Set APIFY_TOKEN in Render → Environment to enable keyword tools.";
+      return "Apify token isn't configured. Set APIFY_SEO_TOKEN (or APIFY_TOKEN) in Render → Environment to enable keyword tools.";
     }
     return err.message;
   }

@@ -10,14 +10,26 @@
  * blocks, etc.). We pick best-effort fields and otherwise pass the raw
  * dataset items through so the UI can still render something useful.
  *
- * All tools share the same APIFY_TOKEN + APIFY_AHREFS_ACTOR_ID env vars
- * already configured for the site-level CMO snapshot.
+ * Tokens & actor:
+ *   APIFY_SEO_TOKEN      — preferred token for SEO + GEO tool calls.
+ *   APIFY_TOKEN          — fallback when APIFY_SEO_TOKEN is unset.
+ *   APIFY_AHREFS_ACTOR_ID — actor id (default radeance~ahrefs-scraper).
  */
 import { env } from "@/shared/env";
 import {
   ApifyNotConfiguredError,
   ApifyAhrefsError,
 } from "@/backend/ahrefs";
+
+/** Pick the most specific Apify token, falling back to the shared one. */
+function seoApifyToken(): string | undefined {
+  return env.APIFY_SEO_TOKEN || env.APIFY_TOKEN || undefined;
+}
+
+/** Public helper so server pages can render a "missing token" hint. */
+export function hasSeoApifyToken(): boolean {
+  return !!seoApifyToken();
+}
 
 const SYNC_TIMEOUT_MS = 90_000;
 
@@ -149,11 +161,12 @@ async function runActor(
   input: AhrefsActorInput,
   opts: { signal?: AbortSignal; timeoutMs?: number } = {}
 ): Promise<unknown[]> {
-  if (!env.APIFY_TOKEN) throw new ApifyNotConfiguredError();
+  const token = seoApifyToken();
+  if (!token) throw new ApifyNotConfiguredError();
   const actor = env.APIFY_AHREFS_ACTOR_ID;
   const url =
     `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/run-sync-get-dataset-items` +
-    `?token=${encodeURIComponent(env.APIFY_TOKEN)}`;
+    `?token=${encodeURIComponent(token)}`;
 
   const ctrl = new AbortController();
   const externalAbort = () => ctrl.abort();
