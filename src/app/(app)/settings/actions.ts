@@ -8,6 +8,7 @@ import { requireWorkspace } from "@/backend/workspace";
 import { normalizeUrl } from "@/backend/scraper/fetch";
 import { extractSocialHandles, type SocialHandles } from "@/backend/social-extractor";
 import { CMO_SLOW_TAG, type CmoVoiceProfile } from "@/backend/agents/cmo-data";
+import { clearCmoSlowCache } from "@/backend/cmo-slow-cache";
 
 const schema = z.object({
   name: z.string().min(1).max(100),
@@ -60,9 +61,11 @@ export async function updateWorkspaceAction(
   });
 
   if (urlChanged) {
-    // Drop the AI-CMO slow-data cache (homepage scrape, PageSpeed, GSC, GA4)
-    // so the panel doesn't keep rendering signals for the previous URL.
+    // Drop both layers of the AI-CMO slow-data cache (homepage scrape,
+    // PageSpeed, GSC, GA4) so the panel never lingers on signals from
+    // the previous URL.
     revalidateTag(CMO_SLOW_TAG);
+    await clearCmoSlowCache(workspace.id);
 
     const { invalidateStaleHNDrafts } = await import("@/backend/agents/hn-stale");
     const { invalidateStaleXDrafts } = await import("@/backend/agents/x-stale");

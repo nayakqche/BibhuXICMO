@@ -93,6 +93,11 @@ model Workspace {
   /// Refreshed when stale (>24h) or when websiteUrl changes. Apify calls are paid, so cache aggressively.
   ahrefsSnapshot Json?
   ahrefsSnapshotAt DateTime?
+  /// Cached homepage-scrape + PageSpeed + GA4 + GSC bundle for /agent/cmo.
+  /// Refreshed every 1h or when websiteUrl changes. Survives serverless cold
+  /// starts (unlike unstable_cache which lives in process memory only).
+  cmoSlowSnapshot   Json?
+  cmoSlowSnapshotAt DateTime?
   ownerUserId  String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

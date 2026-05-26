@@ -7,10 +7,15 @@
  *     (1-15s). Streamed in via React Suspense so the shell renders instantly.
  */
 import { Prisma } from "@prisma/client";
-import { unstable_cache } from "next/cache";
 import { prisma } from "@/backend/db";
 import { fetchPage, type PageSnapshot } from "@/backend/scraper/fetch";
 import { fetchPageSpeed, type PageSpeedResult } from "@/backend/pagespeed";
+import {
+  readCmoSlowCache,
+  writeCmoSlowCache,
+  type CmoSlowGsc,
+  type CmoSlowGa4,
+} from "@/backend/cmo-slow-cache";
 import {
   loadAhrefsWithCache,
   type CachedAhrefsState,
@@ -35,50 +40,12 @@ export type { CmoLlmAnalysis };
 
 const CMO_LLM_CACHE_MS = 24 * 60 * 60 * 1000;
 
-// ---------------------------------------------------------------------------
-// Cached wrappers for the expensive slow-data fetches.
-//
-// Without these, every tab switch / dashboard ↔ CMO navigation triggered a
-// fresh homepage scrape + PageSpeed call + GSC/GA4 query — that's the
-// "Loading site signals (typically 30-60s)" spinner re-appearing every time.
-//
-// `unstable_cache` keys by the function args, so each (workspaceId, url)
-// pair gets its own cached entry. We invalidate via `revalidateTag` from
-// settings/actions.ts when the user changes their website URL — no other
-// path causes the data to go stale meaningfully within a single TTL window.
-// ---------------------------------------------------------------------------
+/**
+ * Re-exported tag retained for backward compat — `refreshCmoSlowDataAction`
+ * still calls `revalidateTag(CMO_SLOW_TAG)` to drop any stray Next.js
+ * route cache entries from before we moved to the DB-backed cache.
+ */
 export const CMO_SLOW_TAG = "cmo-slow";
-
-const ONE_HOUR = 60 * 60;
-const SIX_HOURS = 6 * 60 * 60;
-const THIRTY_MIN = 30 * 60;
-
-const cachedFetchPage = unstable_cache(
-  async (_workspaceId: string, url: string) => fetchPage(url),
-  ["cmo-fetch-page"],
-  { revalidate: ONE_HOUR, tags: [CMO_SLOW_TAG] }
-);
-
-const cachedFetchPageSpeed = unstable_cache(
-  async (_workspaceId: string, url: string) => fetchPageSpeed(url),
-  ["cmo-page-speed"],
-  // PageSpeed scores barely move hour-to-hour — 6h is a sweet spot between
-  // quota savings and freshness. The Google PSI API also has a strict daily
-  // quota; caching here is a hard requirement for free-tier projects.
-  { revalidate: SIX_HOURS, tags: [CMO_SLOW_TAG] }
-);
-
-const cachedLoadGsc = unstable_cache(
-  async (workspaceId: string) => loadGsc(workspaceId),
-  ["cmo-gsc"],
-  { revalidate: THIRTY_MIN, tags: [CMO_SLOW_TAG] }
-);
-
-const cachedLoadGa4 = unstable_cache(
-  async (workspaceId: string) => loadGa4(workspaceId),
-  ["cmo-ga4"],
-  { revalidate: THIRTY_MIN, tags: [CMO_SLOW_TAG] }
-);
 
 export type CmoVoiceProfile = {
   positioning?: string;
@@ -354,22 +321,53 @@ export async function loadCmoSlowData(args: {
     withPageSpeed = true,
   } = args;
 
-  const [liveSnapshot, pageSpeed, gscData, ga4Data, ahrefs] = await Promise.all([
-    websiteUrl
-      ? cachedFetchPage(args.workspaceId, websiteUrl).catch(() => null)
-      : Promise.resolve(null),
-    withPageSpeed && websiteUrl
-      ? cachedFetchPageSpeed(args.workspaceId, websiteUrl).catch(() => null)
-      : Promise.resolve(null),
-    gscConnected ? cachedLoadGsc(args.workspaceId) : Promise.resolve(null),
-    ga4Connected ? cachedLoadGa4(args.workspaceId) : Promise.resolve(null),
-    loadAhrefsWithCache({
-      workspaceId: args.workspaceId,
-      websiteUrl,
-      ahrefsSnapshot: args.ahrefsSnapshot,
-      ahrefsSnapshotAt: args.ahrefsSnapshotAt ?? null,
-    }),
-  ]);
+  // ---- L1 lookup: DB-backed snapshot ----
+  // This is the path that fires on ~99% of tab-switch / dashboard ↔ CMO
+  // navigations. Hits in ~50ms (single Workspace row read) instead of the
+  // 30-60s cold-fetch path below.
+  const cached = await readCmoSlowCache({
+    workspaceId: args.workspaceId,
+    websiteUrl,
+  });
+
+  let liveSnapshot: PageSnapshot | null;
+  let pageSpeed: PageSpeedResult | null;
+  let gscData: CmoSlowGsc | null;
+  let ga4Data: CmoSlowGa4 | null;
+  const ahrefs = await loadAhrefsWithCache({
+    workspaceId: args.workspaceId,
+    websiteUrl,
+    ahrefsSnapshot: args.ahrefsSnapshot,
+    ahrefsSnapshotAt: args.ahrefsSnapshotAt ?? null,
+  });
+
+  if (cached) {
+    liveSnapshot = cached.liveSnapshot;
+    pageSpeed = cached.pageSpeed;
+    // Honour current integration state — if the user disconnected GA4/GSC
+    // since the snapshot was taken, don't show stale rows.
+    gscData = gscConnected ? cached.gsc : null;
+    ga4Data = ga4Connected ? cached.ga4 : null;
+  } else {
+    [liveSnapshot, pageSpeed, gscData, ga4Data] = await Promise.all([
+      websiteUrl ? fetchPage(websiteUrl).catch(() => null) : Promise.resolve(null),
+      withPageSpeed && websiteUrl
+        ? fetchPageSpeed(websiteUrl).catch(() => null)
+        : Promise.resolve(null),
+      gscConnected ? loadGsc(args.workspaceId) : Promise.resolve(null),
+      ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
+    ]);
+
+    // Persist asynchronously — don't await, so the page render is never
+    // blocked on a DB write.
+    if (websiteUrl) {
+      void writeCmoSlowCache({
+        workspaceId: args.workspaceId,
+        websiteUrl,
+        data: { liveSnapshot, pageSpeed, gsc: gscData, ga4: ga4Data },
+      });
+    }
+  }
 
   let llmAnalysis: CmoLlmAnalysis | null = null;
   try {
