@@ -118,6 +118,7 @@ model Workspace {
   igCreators       IGCreator[]
   igCampaigns      IGCampaign[]
   ytCreators       YTCreator[]
+  seoToolRuns      SeoToolRun[]
   igNegotiations   IGNegotiation[]
   contentDrafts    ContentDraft[]
   actionItems      ActionItem[]
@@ -265,6 +266,42 @@ model RankingSnapshot {
   keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
 
   @@index([keywordId, date])
+}
+
+// --------------------------------------------------------------------------
+// SEO / GEO keyword tools — Apify-backed (Ahrefs + AI visibility).
+// One row per (workspace, tool, input) — read first, only re-run Apify on
+// stale rows. Apify is paid so cache aggressively (24h default).
+// --------------------------------------------------------------------------
+enum SeoTool {
+  KEYWORD_DIFFICULTY // KD 0-100 for a single keyword
+  KEYWORD_METRICS    // volume, KD, CPC, traffic potential
+  KEYWORD_RANK       // domain + keyword -> current rank position
+  SERP_OVERVIEW      // top-10 SERP analysis for a keyword
+  TOP_WEBSITES       // ahrefstop.com top sites (global / by category)
+  AI_VISIBILITY      // GEO: how often the domain is cited by ChatGPT, Claude, Perplexity
+  AI_CITATION_CHECK  // GEO: does provider X cite domain for query Y
+  AI_OVERVIEW        // GEO: Google AI Overview content + sources for a query
+  AI_METRICS         // GEO: AI search volume + AIO presence for a keyword
+  TOP_AI_CITED       // GEO: most-cited domains in AI responses
+}
+
+model SeoToolRun {
+  id          String   @id @default(cuid())
+  workspaceId String
+  tool        SeoTool
+  /** SHA-256 of the normalized tool input — keyword, domain+keyword, country, etc. */
+  inputHash   String
+  /** Original input parameters (for display + re-run). */
+  input       Json
+  /** Apify (or LLM) response, normalized into the tool-specific shape. */
+  result      Json
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, tool, inputHash])
+  @@index([workspaceId, tool, createdAt])
 }
 
 // ===========================================================================
