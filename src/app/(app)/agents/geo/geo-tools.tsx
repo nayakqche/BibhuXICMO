@@ -27,6 +27,7 @@ import { Input } from "@/frontend/components/ui/input";
 import { Label } from "@/frontend/components/ui/label";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
+import { pollSeoToolAction } from "../seo/keyword-tool-actions";
 import {
   runAiVisibilityAction,
   runAiMetricsAction,
@@ -41,8 +42,8 @@ import type {
   SerpOverviewResult,
   TopWebsitesResult,
 } from "@/backend/ahrefs-tools";
+import type { SeoToolPollInput } from "@/backend/seo-tools-cache";
 
-// ---------------------------------------------------------------------------
 const COUNTRIES = [
   { value: "us", label: "United States" },
   { value: "gb", label: "United Kingdom" },
@@ -59,6 +60,9 @@ const COUNTRIES = [
   { value: "ae", label: "UAE" },
   { value: "sg", label: "Singapore" },
 ] as const;
+
+const POLL_INTERVAL_MS = 4000;
+const POLL_MAX_MS = 3 * 60 * 1000;
 
 function fmtNumber(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -118,6 +122,49 @@ function Stat({ label, value, suffix }: { label: string; value: string; suffix?:
   );
 }
 
+function RunningPanel({ elapsedMs, statusMsg }: { elapsedMs: number; statusMsg?: string }) {
+  const seconds = Math.floor(elapsedMs / 1000);
+  return (
+    <Card className="border-dashed bg-muted/10">
+      <CardContent className="flex items-center gap-3 py-4 text-sm">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">Running on Apify…</div>
+          <div className="text-xs text-muted-foreground">
+            {statusMsg ? statusMsg : "Spinning up the actor."} <span className="tabular-nums">{seconds}s</span> elapsed · usually 30-90s.
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+async function pollUntilDone(
+  buildInput: () => SeoToolPollInput,
+  onProgress: (elapsedMs: number, statusMsg?: string) => void
+): Promise<
+  | { ok: true; status: "DONE"; data: unknown; cachedAt: Date }
+  | { ok: false; error: string }
+> {
+  const start = Date.now();
+  while (Date.now() - start < POLL_MAX_MS) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    let res;
+    try {
+      res = await pollSeoToolAction(buildInput());
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    if (!res.ok) return res;
+    if (res.status === "DONE") return res;
+    onProgress(Date.now() - start, res.statusMessage);
+  }
+  return {
+    ok: false,
+    error: "Apify run didn't finish within 3 minutes. Try again later.",
+  };
+}
+
 // ---------------------------------------------------------------------------
 export function GeoTools({
   defaultDomain,
@@ -136,7 +183,7 @@ export function GeoTools({
               GEO Tools
             </CardTitle>
             <CardDescription>
-              Apify + LLM probes. Results cache for 24h to keep usage cheap.
+              Apify + LLM probes. First run takes 30-90s; results cache for 24h.
             </CardDescription>
           </div>
           {!hasApifyToken && (
@@ -189,13 +236,12 @@ export function GeoTools({
 }
 
 // ---------------------------------------------------------------------------
-// 1) AI Visibility
-// ---------------------------------------------------------------------------
 function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
   const [domain, setDomain] = useState(defaultDomain);
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<AiVisibilityResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -204,9 +250,35 @@ function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runAiVisibilityAction({ domain, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const normDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+        const final = await pollUntilDone(
+          () => ({
+            tool: "AI_VISIBILITY",
+            domain: normDomain,
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as AiVisibilityResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -244,6 +316,7 @@ function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-4 py-4">
@@ -253,25 +326,14 @@ function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
             </div>
             {data.byProvider.length > 0 && (
               <div>
-                <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  By provider
-                </div>
+                <div className="mb-1.5 text-xs font-medium text-muted-foreground">By provider</div>
                 <ul className="grid gap-2 sm:grid-cols-3">
                   {data.byProvider.map((p) => (
-                    <li
-                      key={p.provider}
-                      className="rounded-md border bg-card px-3 py-2 text-sm"
-                    >
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {p.provider}
-                      </div>
+                    <li key={p.provider} className="rounded-md border bg-card px-3 py-2 text-sm">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{p.provider}</div>
                       <div className="mt-0.5 flex items-baseline gap-2">
-                        <span className="text-lg font-semibold tabular-nums">
-                          {p.score ?? "—"}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {fmtNumber(p.mentions)} mentions
-                        </span>
+                        <span className="text-lg font-semibold tabular-nums">{p.score ?? "—"}</span>
+                        <span className="text-[10px] text-muted-foreground">{fmtNumber(p.mentions)} mentions</span>
                       </div>
                     </li>
                   ))}
@@ -280,19 +342,12 @@ function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
             )}
             {data.topQueries.length > 0 && (
               <div>
-                <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Top queries citing this domain
-                </div>
+                <div className="mb-1.5 text-xs font-medium text-muted-foreground">Top queries citing this domain</div>
                 <ul className="divide-y rounded-md border">
                   {data.topQueries.map((q) => (
-                    <li
-                      key={q.query}
-                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
-                    >
+                    <li key={q.query} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                       <span className="truncate">{q.query}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {fmtNumber(q.mentions)}
-                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{fmtNumber(q.mentions)}</span>
                     </li>
                   ))}
                 </ul>
@@ -307,13 +362,12 @@ function AiVisibilityTool({ defaultDomain }: { defaultDomain: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// 2) AI Metrics
-// ---------------------------------------------------------------------------
 function AiMetricsTool() {
   const [keyword, setKeyword] = useState("");
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<KeywordMetricsResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -322,9 +376,34 @@ function AiMetricsTool() {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runAiMetricsAction({ keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "KEYWORD_METRICS",
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as KeywordMetricsResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -362,6 +441,7 @@ function AiMetricsTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">
@@ -385,8 +465,6 @@ function AiMetricsTool() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// 3) AI Citation Check (LLM-based)
 // ---------------------------------------------------------------------------
 function CitationCheckTool({ defaultDomain }: { defaultDomain: string }) {
   const [domain, setDomain] = useState(defaultDomain);
@@ -463,9 +541,7 @@ function CitationCheckTool({ defaultDomain }: { defaultDomain: string }) {
               {data.byProvider.map((p) => (
                 <li key={p.provider} className="rounded-md border bg-card p-3 text-sm">
                   <div className="mb-1 flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">
-                      {p.provider}
-                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">{p.provider}</Badge>
                     {p.cited ? (
                       <Badge variant="success" className="gap-1 text-[10px]">
                         <Check className="h-3 w-3" /> cited
@@ -478,16 +554,12 @@ function CitationCheckTool({ defaultDomain }: { defaultDomain: string }) {
                       </Badge>
                     )}
                   </div>
-                  {p.summary && (
-                    <p className="text-xs text-muted-foreground">{p.summary}</p>
-                  )}
+                  {p.summary && <p className="text-xs text-muted-foreground">{p.summary}</p>}
                   {p.competitors.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <span className="text-[10px] text-muted-foreground">cites:</span>
                       {p.competitors.map((c) => (
-                        <Badge key={c} variant="outline" className="text-[10px]">
-                          {c}
-                        </Badge>
+                        <Badge key={c} variant="outline" className="text-[10px]">{c}</Badge>
                       ))}
                     </div>
                   )}
@@ -503,13 +575,12 @@ function CitationCheckTool({ defaultDomain }: { defaultDomain: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// 4) AI Overview
-// ---------------------------------------------------------------------------
 function AiOverviewTool() {
   const [keyword, setKeyword] = useState("");
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<SerpOverviewResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -518,9 +589,34 @@ function AiOverviewTool() {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runAiOverviewAction({ keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "SERP_OVERVIEW",
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as SerpOverviewResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -561,6 +657,7 @@ function AiOverviewTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">
@@ -578,16 +675,12 @@ function AiOverviewTool() {
                 .filter((f) => !/ai\s*overview|aio|sge/i.test(f))
                 .slice(0, 6)
                 .map((f) => (
-                  <Badge key={f} variant="outline" className="text-[10px]">
-                    {f}
-                  </Badge>
+                  <Badge key={f} variant="outline" className="text-[10px]">{f}</Badge>
                 ))}
             </div>
             {data.results.length > 0 && (
               <div>
-                <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Sources Google cites in the SERP / AIO
-                </div>
+                <div className="mb-1.5 text-xs font-medium text-muted-foreground">Sources Google cites in the SERP / AIO</div>
                 <ul className="divide-y rounded-md border">
                   {data.results.slice(0, 8).map((r) => (
                     <li key={`${r.position}-${r.url}`} className="px-3 py-2 text-sm">
@@ -602,9 +695,7 @@ function AiOverviewTool() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium">{r.title}</div>
-                          <div className="text-[10px] text-muted-foreground">
-                            {r.domain || r.url}
-                          </div>
+                          <div className="text-[10px] text-muted-foreground">{r.domain || r.url}</div>
                         </div>
                         <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
                       </a>
@@ -622,20 +713,44 @@ function AiOverviewTool() {
 }
 
 // ---------------------------------------------------------------------------
-// 5) Top AI-cited sites
-// ---------------------------------------------------------------------------
 function TopAiCitedTool() {
   const [country, setCountry] = useState("us");
   const [category, setCategory] = useState("");
   const [data, setData] = useState<TopWebsitesResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runTopAiCitedAction({ country, category: category || null });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "TOP_WEBSITES",
+            country,
+            category: category.trim().toLowerCase() || null,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as TopWebsitesResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -670,6 +785,7 @@ function TopAiCitedTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">

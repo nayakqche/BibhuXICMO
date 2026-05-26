@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import {
   BarChart3,
-  CheckCircle2,
   ExternalLink,
   Globe,
   Loader2,
@@ -34,6 +33,7 @@ import {
   runKeywordRankAction,
   runSerpOverviewAction,
   runTopWebsitesAction,
+  pollSeoToolAction,
 } from "./keyword-tool-actions";
 import type {
   KeywordDifficultyResult,
@@ -42,9 +42,8 @@ import type {
   SerpOverviewResult,
   TopWebsitesResult,
 } from "@/backend/ahrefs-tools";
+import type { SeoToolPollInput } from "@/backend/seo-tools-cache";
 
-// ---------------------------------------------------------------------------
-// Country list (top SEO targets)
 // ---------------------------------------------------------------------------
 const COUNTRIES = [
   { value: "us", label: "United States" },
@@ -62,6 +61,9 @@ const COUNTRIES = [
   { value: "ae", label: "UAE" },
   { value: "sg", label: "Singapore" },
 ] as const;
+
+const POLL_INTERVAL_MS = 4000;
+const POLL_MAX_MS = 3 * 60 * 1000; // 3 minutes
 
 function fmtNumber(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -116,8 +118,36 @@ function CacheBadge({ fromCache, at }: { fromCache: boolean; at: Date }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Container
+/**
+ * Poll Apify until the run finishes. Calls pollSeoToolAction at fixed
+ * intervals and resolves with the final result.
+ */
+async function pollUntilDone(
+  buildInput: () => SeoToolPollInput,
+  onProgress: (elapsedMs: number, statusMsg?: string) => void
+): Promise<
+  | { ok: true; status: "DONE"; data: unknown; cachedAt: Date }
+  | { ok: false; error: string }
+> {
+  const start = Date.now();
+  while (Date.now() - start < POLL_MAX_MS) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    let res;
+    try {
+      res = await pollSeoToolAction(buildInput());
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    if (!res.ok) return res;
+    if (res.status === "DONE") return res;
+    onProgress(Date.now() - start, res.statusMessage);
+  }
+  return {
+    ok: false,
+    error: "Apify run didn't finish within 3 minutes. Try again or use a different keyword.",
+  };
+}
+
 // ---------------------------------------------------------------------------
 export function KeywordTools({
   defaultDomain,
@@ -136,7 +166,7 @@ export function KeywordTools({
               Keyword Tools
             </CardTitle>
             <CardDescription>
-              Ahrefs-powered. Results cache for 24h to keep Apify costs down.
+              Ahrefs-powered. First run takes 30-90s on Apify; results cache for 24h.
             </CardDescription>
           </div>
           {!hasApifyToken && (
@@ -189,6 +219,27 @@ export function KeywordTools({
 }
 
 // ---------------------------------------------------------------------------
+// Reusable status panel shown while Apify is processing.
+// ---------------------------------------------------------------------------
+function RunningPanel({ elapsedMs, statusMsg }: { elapsedMs: number; statusMsg?: string }) {
+  const seconds = Math.floor(elapsedMs / 1000);
+  return (
+    <Card className="border-dashed bg-muted/10">
+      <CardContent className="flex items-center gap-3 py-4 text-sm">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">Running on Apify…</div>
+          <div className="text-xs text-muted-foreground">
+            {statusMsg ? statusMsg : "Spinning up the actor and scraping Ahrefs."}{" "}
+            <span className="tabular-nums">{seconds}s</span> elapsed · usually 30-90s.
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tool 1 — Keyword Difficulty
 // ---------------------------------------------------------------------------
 function KeywordDifficultyTool() {
@@ -196,6 +247,7 @@ function KeywordDifficultyTool() {
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<KeywordDifficultyResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -204,9 +256,34 @@ function KeywordDifficultyTool() {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runKeywordDifficultyAction({ keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "KEYWORD_DIFFICULTY",
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as KeywordDifficultyResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -244,6 +321,7 @@ function KeywordDifficultyTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">
@@ -284,13 +362,14 @@ function KeywordDifficultyTool() {
 }
 
 // ---------------------------------------------------------------------------
-// Tool 2 — Keyword Metrics (volume, KD, CPC, traffic potential)
+// Tool 2 — Keyword Metrics
 // ---------------------------------------------------------------------------
 function KeywordMetricsTool() {
   const [keyword, setKeyword] = useState("");
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<KeywordMetricsResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -299,9 +378,34 @@ function KeywordMetricsTool() {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runKeywordMetricsAction({ keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "KEYWORD_METRICS",
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as KeywordMetricsResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -339,6 +443,7 @@ function KeywordMetricsTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-4 py-4">
@@ -392,6 +497,7 @@ function RankCheckerTool({ defaultDomain }: { defaultDomain: string }) {
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<KeywordRankResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -400,9 +506,36 @@ function RankCheckerTool({ defaultDomain }: { defaultDomain: string }) {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runKeywordRankAction({ domain, keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const normDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+        const final = await pollUntilDone(
+          () => ({
+            tool: "KEYWORD_RANK",
+            domain: normDomain,
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as KeywordRankResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -453,6 +586,7 @@ function RankCheckerTool({ defaultDomain }: { defaultDomain: string }) {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-2 py-4">
@@ -498,6 +632,7 @@ function SerpOverviewTool() {
   const [country, setCountry] = useState("us");
   const [data, setData] = useState<SerpOverviewResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
@@ -506,9 +641,34 @@ function SerpOverviewTool() {
       return;
     }
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runSerpOverviewAction({ keyword, country });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "SERP_OVERVIEW",
+            keyword: keyword.trim().toLowerCase(),
+            country,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as SerpOverviewResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -546,6 +706,7 @@ function SerpOverviewTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">
@@ -617,13 +778,39 @@ function TopWebsitesTool() {
   const [category, setCategory] = useState("");
   const [data, setData] = useState<TopWebsitesResult | null>(null);
   const [meta, setMeta] = useState<{ fromCache: boolean; at: Date } | null>(null);
+  const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function run() {
     startTransition(async () => {
+      setData(null);
+      setMeta(null);
+      setProgress(null);
       const res = await runTopWebsitesAction({ country, category: category || null });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        setProgress({ elapsedMs: 0 });
+        const final = await pollUntilDone(
+          () => ({
+            tool: "TOP_WEBSITES",
+            country,
+            category: category.trim().toLowerCase() || null,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setProgress({ elapsedMs, statusMsg })
+        );
+        setProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        setData(final.data as TopWebsitesResult);
+        setMeta({ fromCache: false, at: final.cachedAt });
+        toast.success("Fresh result");
         return;
       }
       setData(res.data);
@@ -658,6 +845,7 @@ function TopWebsitesTool() {
           </Button>
         </div>
       </div>
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
       {data && (
         <Card className="bg-muted/20">
           <CardContent className="space-y-3 py-4">
@@ -706,8 +894,6 @@ function TopWebsitesTool() {
 }
 
 // ---------------------------------------------------------------------------
-// Small helpers
-// ---------------------------------------------------------------------------
 function Stat({
   label,
   value,
@@ -729,6 +915,3 @@ function Stat({
     </div>
   );
 }
-
-// CheckCircle2 import is referenced for future status badges — silence ESLint
-void CheckCircle2;
