@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/backend/db";
 import { requireWorkspace } from "@/backend/workspace";
+import { hasSeoApifyToken } from "@/backend/ahrefs-tools";
+import {
+  runAiVisibility,
+  hashInput,
+} from "@/backend/seo-tools-cache";
+import type { AiVisibilityResult } from "@/backend/ahrefs-tools";
 import type {
   AiCitationsActionResult,
   AiCitationsBundle,
@@ -11,160 +17,191 @@ import type {
 } from "./ai-citations-types";
 
 // ---------------------------------------------------------------------------
-// Data source: the existing `GeoQuery` LLM-probe table.
-//
-// The radeance/ahrefs-scraper Apify actor doesn't return AI-visibility data
-// despite the include_ai_visibility flag — it only returns traffic /
-// authority / backlinks. So the AI citations panel sources from the LLM
-// probes you already have configured (OpenAI / Anthropic / Google). Each
-// probe is a (provider, prompt, cited) row that we bucket by platform.
-//
-// Counts:
-//   citations = # of probes with cited=true in the window.
-//   pages     = # of distinct prompts cited (proxy for unique cited pages).
-//
-// Delta: current 30-day window vs the previous 30-day window.
+// Source of truth: a single Apify `AI_VISIBILITY` run on the Ahrefs scraper.
+// The actor returns per-platform citation counts (ChatGPT, Gemini,
+// Perplexity, Copilot, GoogleAIOverviews, GoogleAIMode) plus monthly trends
+// in one call. Result is cached for 24h via SeoToolRun. No LLM probes.
 // ---------------------------------------------------------------------------
 
-const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-
 function normalizeDomain(input: string): string {
-  let s = input.trim().toLowerCase();
-  if (!s) return s;
-  s = s.replace(/^https?:\/\//, "").replace(/^www\./, "");
-  s = s.split("/")[0];
-  return s;
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0];
 }
 
-/**
- * Map a model/provider string (e.g. "gemini-1.5-flash", "claude-haiku-4-5",
- * "gpt-4o-mini") to the reference platform key. We follow the reference
- * layout's 6 tiles — Claude responses are folded into the ChatGPT tile
- * because Claude has no dedicated tile in the design.
- */
-function mapProvider(name: string): PlatformKey | null {
-  const s = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (!s) return null;
-  // Google AI Overviews / SGE
-  if (s.includes("aioverview") || s.includes("googleaio") || s === "aio" || s === "sge")
-    return "aiOverviews";
-  // Gemini / Bard / Google models
-  if (s.includes("gemini") || s.includes("bard") || s.startsWith("googleai"))
-    return "gemini";
-  // ChatGPT / OpenAI / GPT family
-  if (
-    s.includes("chatgpt") ||
-    s.includes("openai") ||
-    s.startsWith("gpt") ||
-    s.startsWith("o1") ||
-    s.startsWith("o3") ||
-    s.startsWith("o4") ||
-    s.includes("davinci")
-  )
-    return "chatgpt";
-  // Claude / Anthropic — fold into ChatGPT tile per the reference layout.
-  if (
-    s.includes("claude") ||
-    s.includes("anthropic") ||
-    s.includes("haiku") ||
-    s.includes("sonnet") ||
-    s.includes("opus")
-  )
-    return "chatgpt";
-  // Perplexity
-  if (s.includes("perplexity") || s === "pplx") return "perplexity";
-  // Microsoft Copilot / Bing Chat
-  if (s.includes("copilot") || s.includes("bingchat") || s === "bing")
-    return "copilot";
-  // xAI Grok
-  if (s.includes("grok") || s === "xai") return "grok";
-  return null;
+function brandFromDomain(domain: string): string {
+  const s = normalizeDomain(domain);
+  if (!s) return "";
+  const root = s.split(".")[0];
+  return root.charAt(0).toUpperCase() + root.slice(1);
 }
 
-type ProbeRow = { provider: string; cited: boolean; prompt: string; checkedAt: Date };
-
-function aggregate(probes: ProbeRow[], windowStart: number, windowEnd: number) {
-  const byPlatform = new Map<
-    PlatformKey,
-    { citations: number; prompts: Set<string> }
-  >();
-  for (const p of probes) {
-    if (!p.cited) continue;
-    const t = p.checkedAt.getTime();
-    if (t < windowStart || t >= windowEnd) continue;
-    const platform = mapProvider(p.provider);
-    if (!platform) continue;
-    if (!byPlatform.has(platform)) {
-      byPlatform.set(platform, { citations: 0, prompts: new Set() });
+function avResultToBundle(
+  result: AiVisibilityResult,
+  domain: string,
+  fetchedAt: Date
+): AiCitationsBundle {
+  const current: Partial<Record<PlatformKey, PlatformCounts>> = {};
+  const previous: Partial<Record<PlatformKey, PlatformCounts>> = {};
+  for (const row of result.byProvider) {
+    if (!isPlatformKey(row.platform)) continue;
+    const key = row.platform as PlatformKey;
+    current[key] = {
+      citations: row.citations ?? 0,
+      // Pages aren't broken out per platform — show "—" until we surface
+      // the cited_pages-per-model field if/when the actor adds it.
+      pages: 0,
+    };
+    if (row.priorMonthCitations !== null) {
+      previous[key] = {
+        citations: row.priorMonthCitations ?? 0,
+        pages: 0,
+      };
     }
-    const entry = byPlatform.get(platform)!;
-    entry.citations++;
-    entry.prompts.add(p.prompt.trim().toLowerCase());
   }
-  const out: Partial<Record<PlatformKey, PlatformCounts>> = {};
-  for (const [k, v] of byPlatform.entries()) {
-    out[k] = { citations: v.citations, pages: v.prompts.size };
-  }
-  return out;
-}
-
-async function buildBundle(
-  workspaceId: string,
-  domain: string
-): Promise<AiCitationsBundle | null> {
-  const now = Date.now();
-  const cutoffPrior = new Date(now - 2 * WINDOW_MS);
-
-  const probes: ProbeRow[] = await prisma.geoQuery.findMany({
-    where: { workspaceId, checkedAt: { gte: cutoffPrior } },
-    select: { provider: true, cited: true, prompt: true, checkedAt: true },
-  });
-  if (probes.length === 0) return null;
-
-  const current = aggregate(probes, now - WINDOW_MS, now);
-  const previous = aggregate(probes, now - 2 * WINDOW_MS, now - WINDOW_MS);
-
-  // Find the most recent probe checkedAt as the bundle timestamp.
-  const latestTs = probes.reduce(
-    (acc, p) => Math.max(acc, p.checkedAt.getTime()),
-    0
-  );
-
   return {
     domain,
     country: "us",
-    fetchedAt: new Date(latestTs).toISOString(),
-    previousAt: new Date(now - WINDOW_MS).toISOString(),
+    fetchedAt: fetchedAt.toISOString(),
+    previousAt: null,
     current,
     previous,
   };
+}
+
+function isPlatformKey(s: string): s is PlatformKey {
+  return (
+    s === "aiOverviews" ||
+    s === "chatgpt" ||
+    s === "gemini" ||
+    s === "perplexity" ||
+    s === "copilot" ||
+    s === "grok"
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Public actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Load whatever's already cached in `SeoToolRun` for AI_VISIBILITY. Does
+ * NOT trigger a fresh Apify run — that's `startAiCitationsRunAction`.
+ * Returns null bundle when there's no cached result yet.
+ */
 export async function loadAiCitationsAction(args?: {
   domain?: string;
+  keyword?: string;
 }): Promise<AiCitationsActionResult> {
   const { workspace } = await requireWorkspace();
   const domain = normalizeDomain(args?.domain ?? workspace.websiteUrl ?? "");
   if (!domain) return { ok: true, data: null };
-  return { ok: true, data: await buildBundle(workspace.id, domain) };
+  const keyword = (args?.keyword ?? brandFromDomain(domain)).trim();
+  if (!keyword) return { ok: true, data: null };
+
+  const ih = hashInput({ keyword, country: "us", tool: "AI_VISIBILITY" });
+  const row = await prisma.seoToolRun.findUnique({
+    where: {
+      workspaceId_tool_inputHash: {
+        workspaceId: workspace.id,
+        tool: "AI_VISIBILITY",
+        inputHash: ih,
+      },
+    },
+  });
+  if (!row) return { ok: true, data: null };
+  const result = row.result as AiVisibilityResult;
+  return { ok: true, data: avResultToBundle(result, domain, row.createdAt) };
+}
+
+export type StartRunResult =
+  | { ok: true; pending: true; runId: string; datasetId: string }
+  | { ok: true; pending: false; data: AiCitationsBundle | null }
+  | { ok: false; error: string };
+
+/**
+ * Start (or hit cache for) a fresh Apify AI_VISIBILITY run. Returns either
+ * a pending handle for the client to poll, or the cached result if a
+ * recent run exists.
+ */
+export async function startAiCitationsRunAction(args?: {
+  domain?: string;
+  keyword?: string;
+}): Promise<StartRunResult> {
+  if (!hasSeoApifyToken()) {
+    return {
+      ok: false,
+      error: "Apify token not set. Add APIFY_SEO_TOKEN (or APIFY_TOKEN).",
+    };
+  }
+  const { workspace } = await requireWorkspace();
+  const domain = normalizeDomain(args?.domain ?? workspace.websiteUrl ?? "");
+  if (!domain) {
+    return { ok: false, error: "Workspace has no website URL." };
+  }
+  const keyword = (args?.keyword ?? brandFromDomain(domain)).trim();
+  if (!keyword) {
+    return { ok: false, error: "Couldn't infer a brand name from the domain." };
+  }
+
+  const res = await runAiVisibility({
+    workspaceId: workspace.id,
+    keyword,
+    country: "us",
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  if ("pending" in res) {
+    return { ok: true, pending: true, runId: res.runId, datasetId: res.datasetId };
+  }
+  // Cache hit — return the bundle directly.
+  revalidatePath("/agents/geo");
+  return {
+    ok: true,
+    pending: false,
+    data: avResultToBundle(res.data, domain, res.cachedAt),
+  };
 }
 
 /**
- * Refresh = re-aggregate from the GeoQuery table. No Apify / LLM calls are
- * made here — the panel re-uses whatever probes the GEO agent (the
- * "Run GEO check" button at the top of the page) already produced.
+ * Apify poll → bundle conversion. The client polls this until status DONE.
  */
-export async function refreshAiCitationsAction(args?: {
+export type PollRunResult =
+  | { ok: true; status: "RUNNING"; message?: string }
+  | { ok: true; status: "DONE"; data: AiCitationsBundle }
+  | { ok: false; error: string };
+
+export async function pollAiCitationsRunAction(args: {
+  runId: string;
+  datasetId: string;
   domain?: string;
-}): Promise<AiCitationsActionResult> {
+  keyword?: string;
+}): Promise<PollRunResult> {
   const { workspace } = await requireWorkspace();
-  const domain = normalizeDomain(args?.domain ?? workspace.websiteUrl ?? "");
-  if (!domain) return { ok: true, data: null };
-  const data = await buildBundle(workspace.id, domain);
+  const domain = normalizeDomain(args.domain ?? workspace.websiteUrl ?? "");
+  if (!domain) return { ok: false, error: "Workspace has no website URL." };
+  const keyword = (args.keyword ?? brandFromDomain(domain)).trim();
+  if (!keyword) return { ok: false, error: "Couldn't infer a brand name." };
+
+  const { pollSeoTool } = await import("@/backend/seo-tools-cache");
+  const res = await pollSeoTool(workspace.id, {
+    tool: "AI_VISIBILITY",
+    keyword,
+    country: "us",
+    runId: args.runId,
+    datasetId: args.datasetId,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  if (res.status === "RUNNING") {
+    return { ok: true, status: "RUNNING", message: res.statusMessage };
+  }
+  const data = res.data as AiVisibilityResult;
   revalidatePath("/agents/geo");
-  return { ok: true, data };
+  return {
+    ok: true,
+    status: "DONE",
+    data: avResultToBundle(data, domain, res.cachedAt),
+  };
 }
