@@ -68,6 +68,7 @@ export type LinkedInPollInput =
   | {
       type: "PROFILES";
       queries: string[];
+      findEmail: boolean;
       runId: string;
       datasetId: string;
     };
@@ -279,6 +280,7 @@ export async function runProfile(args: {
 export async function runProfiles(args: {
   workspaceId: string;
   queries: string[];
+  findEmail?: boolean;
 }): Promise<CachedLinkedInResult<LinkedInProfilesResult>> {
   const queries = Array.from(
     new Set(args.queries.map(normalizeLinkedInTarget).filter(Boolean))
@@ -286,8 +288,9 @@ export async function runProfiles(args: {
   if (queries.length === 0) {
     return { ok: false, error: "Enter at least one LinkedIn profile URL." };
   }
+  const findEmail = args.findEmail ?? false;
 
-  const inputHash = hashInput({ queries, type: "PROFILES" });
+  const inputHash = hashInput({ queries, findEmail, type: "PROFILES" });
   const cached = await readCached<LinkedInProfilesResult>({
     workspaceId: args.workspaceId,
     type: "PROFILE",
@@ -299,7 +302,7 @@ export async function runProfiles(args: {
   }
 
   try {
-    const handle = await startProfilesRun(queries);
+    const handle = await startProfilesRun(queries, { findEmail });
     return {
       ok: true,
       pending: true,
@@ -388,7 +391,7 @@ export async function pollLinkedInTool(
       return id ? !found.has(id) : false;
     });
 
-    const ih = hashInput({ queries: input.queries, type: "PROFILES" });
+    const ih = hashInput({ queries: input.queries, findEmail: input.findEmail, type: "PROFILES" });
     await writeCached({
       workspaceId,
       type: "PROFILE",

@@ -8,6 +8,7 @@ import {
   Heart,
   Image as ImageIcon,
   Loader2,
+  Mail,
   MessageSquare,
   Newspaper,
   Repeat2,
@@ -480,6 +481,7 @@ function InsightsBlock({ insights }: { insights: CompanyPostsInsights }) {
 // ---------------------------------------------------------------------------
 function BulkProfileTool({ disabled }: { disabled: boolean }) {
   const [query, setQuery] = useState("");
+  const [findEmail, setFindEmail] = useState(true);
   const [result, setResult] = useState<LinkedInProfilesResult | null>(null);
   const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -496,7 +498,7 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
     startTransition(async () => {
       setResult(null);
       setProgress(null);
-      const res = await startProfilesAction({ queries });
+      const res = await startProfilesAction({ queries, findEmail });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
         return;
@@ -507,6 +509,7 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
           () => ({
             type: "PROFILES",
             queries,
+            findEmail,
             runId: res.runId,
             datasetId: res.datasetId,
           }),
@@ -548,6 +551,14 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
           disabled={pending || disabled}
         />
       </div>
+      <Toggle
+        id="li-find-email"
+        label="Find email addresses"
+        hint="SMTP-validated email lookup (extra Apify cost, not guaranteed). Phone numbers aren't available — LinkedIn never exposes them."
+        checked={findEmail}
+        onChange={setFindEmail}
+        disabled={pending || disabled}
+      />
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs text-muted-foreground">Up to 20 profiles per run.</span>
         <Button onClick={run} disabled={pending || disabled} className="gap-2">
@@ -620,6 +631,18 @@ function ProfileCard({ profile }: { profile: LinkedInProfile }) {
               {profile.connections != null && <span>{fmt(profile.connections)} connections</span>}
               {profile.followers != null && <span>{fmt(profile.followers)} followers</span>}
             </div>
+            {profile.email && (
+              <a
+                href={`mailto:${profile.email}`}
+                className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {profile.email}
+                {profile.emails.length > 1 && (
+                  <span className="text-muted-foreground">+{profile.emails.length - 1} more</span>
+                )}
+              </a>
+            )}
           </div>
           <Button size="sm" variant="outline" onClick={draft} disabled={drafting} className="shrink-0 gap-1.5">
             {drafting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
