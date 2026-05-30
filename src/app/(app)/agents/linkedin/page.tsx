@@ -1,8 +1,8 @@
-import { Linkedin } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import { GenericAgentPage } from "@/frontend/components/app/generic-agent-page";
 import { hasLinkedInApifyToken } from "@/integrations/linkedin-apify";
+import { LinkedinLogo } from "@/frontend/components/brand-logos";
 import { LinkedInComposer } from "./composer";
 import { LinkedInTools } from "./linkedin-tools";
 
@@ -55,7 +55,7 @@ export default async function LinkedInAgentPage() {
     <GenericAgentPage
       title="LinkedIn Agent"
       description="Scrape competitor posts and prospect profiles via Apify, then draft brand-voice content and personalized outreach. You publish."
-      icon={Linkedin}
+      icon={LinkedinLogo}
       agentId="linkedin"
       drafts={drafts}
       runs={runs}

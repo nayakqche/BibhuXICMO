@@ -14,18 +14,14 @@ import {
   Repeat2,
   Sparkles,
   ThumbsUp,
+  UserPlus,
   UserSearch,
   Users,
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/frontend/components/ui/card";
+import { Card, CardContent } from "@/frontend/components/ui/card";
 import { Input } from "@/frontend/components/ui/input";
 import { Textarea } from "@/frontend/components/ui/textarea";
 import { Label } from "@/frontend/components/ui/label";
@@ -48,6 +44,7 @@ import type {
   LinkedInMediaType,
 } from "@/integrations/linkedin-apify";
 import type { LinkedInPollInput } from "@/backend/linkedin-tools";
+import { LinkedinLogo } from "@/frontend/components/brand-logos";
 
 const POLL_INTERVAL_MS = 4000;
 const POLL_MAX_MS = 4 * 60 * 1000;
@@ -121,11 +118,19 @@ export function LinkedInTools({
   hasApifyToken: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">LinkedIn intelligence</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <Card className="overflow-hidden border-[#0A66C2]/30">
+      <div className="flex items-center gap-3 border-b bg-gradient-to-r from-[#0A66C2]/15 via-sky-500/10 to-transparent px-5 py-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-[#0A66C2]/20">
+          <LinkedinLogo className="h-6 w-6" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold">LinkedIn intelligence</h2>
+          <p className="text-xs text-muted-foreground">
+            Scrape company posts &amp; enrich prospect profiles via Apify — no cookies, no account.
+          </p>
+        </div>
+      </div>
+      <CardContent className="pt-5">
         {!hasApifyToken && (
           <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
             Add your Apify keys to enable scraping:{" "}
@@ -209,6 +214,9 @@ function CompanyInsightsTool({
   const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const [analyzing, startAnalyze] = useTransition();
+  const [commenters, setCommenters] = useState<LinkedInProfilesResult | null>(null);
+  const [commProgress, setCommProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
+  const [scraping, startScrape] = useTransition();
 
   function run() {
     if (!target.trim()) {
@@ -218,6 +226,7 @@ function CompanyInsightsTool({
     startTransition(async () => {
       setData(null);
       setInsights(null);
+      setCommenters(null);
       setProgress(null);
       const targets = target
         .split(/[\n,]/)
@@ -273,6 +282,64 @@ function CompanyInsightsTool({
       }
       setInsights(res.data);
       toast.success(`Generated ${res.data.draftIds.length} draft${res.data.draftIds.length === 1 ? "" : "s"}`);
+    });
+  }
+
+  // Unique commenter profile URLs across all scraped posts (people who engaged).
+  const commenterUrls = data
+    ? Array.from(
+        new Set(
+          data.posts
+            .flatMap((post) => post.topComments)
+            .map((c) => c.authorUrl)
+            .filter((u): u is string => !!u && /linkedin\.com\/in\//i.test(u))
+        )
+      )
+    : [];
+
+  function scrapeCommenters() {
+    const urls = commenterUrls.slice(0, 20);
+    if (urls.length === 0) {
+      toast.error("No commenter profiles found. Turn on \u201cScrape comments\u201d and rescan first.");
+      return;
+    }
+    startScrape(async () => {
+      setCommenters(null);
+      setCommProgress({ elapsedMs: 0 });
+      const res = await startProfilesAction({ queries: urls, findEmail: false });
+      if (!res.ok) {
+        setCommProgress(null);
+        toast.error("Lookup failed", { description: res.error, duration: 8000 });
+        return;
+      }
+      if ("pending" in res) {
+        const final = await pollUntilDone(
+          () => ({
+            type: "PROFILES",
+            queries: urls,
+            findEmail: false,
+            runId: res.runId,
+            datasetId: res.datasetId,
+          }),
+          (elapsedMs, statusMsg) => setCommProgress({ elapsedMs, statusMsg })
+        );
+        setCommProgress(null);
+        if (!final.ok) {
+          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          return;
+        }
+        const d = final.data as LinkedInProfilesResult;
+        setCommenters(d);
+        toast.success(`Enriched ${d.count} commenter${d.count === 1 ? "" : "s"}`);
+        return;
+      }
+      setCommProgress(null);
+      setCommenters(res.data);
+      toast.success(
+        res.fromCache
+          ? "Loaded from cache"
+          : `Enriched ${res.data.count} commenter${res.data.count === 1 ? "" : "s"}`
+      );
     });
   }
 
@@ -347,10 +414,18 @@ function CompanyInsightsTool({
                 <span className="font-semibold tabular-nums">{data.totalPosts}</span> posts ·
                 sorted by engagement
               </div>
-              <Button size="sm" variant="outline" onClick={analyze} disabled={analyzing} className="gap-1.5">
-                {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                Analyze + draft
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {commenterUrls.length > 0 && (
+                  <Button size="sm" variant="outline" onClick={scrapeCommenters} disabled={scraping} className="gap-1.5">
+                    {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                    Scrape {commenterUrls.length} commenter{commenterUrls.length === 1 ? "" : "s"}
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={analyze} disabled={analyzing} className="gap-1.5">
+                  {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  Analyze + draft
+                </Button>
+              </div>
             </div>
 
             {data.posts.length === 0 ? (
@@ -366,6 +441,18 @@ function CompanyInsightsTool({
             )}
 
             {insights && <InsightsBlock insights={insights} />}
+
+            {commProgress && (
+              <RunningPanel elapsedMs={commProgress.elapsedMs} statusMsg={commProgress.statusMsg} />
+            )}
+            {commenters && (
+              <div className="space-y-3 rounded-md border border-[#0A66C2]/30 bg-[#0A66C2]/5 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#0A66C2] dark:text-sky-400">
+                  People who commented
+                </div>
+                <ProfileResults result={commenters} />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -392,6 +479,17 @@ function PostRow({ post: p }: { post: LinkedInPost }) {
             )}
           </div>
           <p className="mt-1 line-clamp-3 whitespace-pre-wrap">{p.content || "(no text)"}</p>
+          {p.mediaUrl && (p.mediaType === "image" || p.mediaType === "video") && (
+            <div className="relative mt-2 overflow-hidden rounded-md border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.mediaUrl} alt="" loading="lazy" className="max-h-56 w-full object-cover" />
+              {p.mediaType === "video" && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                  <Video className="h-8 w-8 text-white drop-shadow" />
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {p.url && (
           <a href={p.url} target="_blank" rel="noreferrer" className="shrink-0 text-muted-foreground hover:text-primary">
@@ -423,7 +521,18 @@ function PostRow({ post: p }: { post: LinkedInPost }) {
           </div>
           {p.topComments.slice(0, 5).map((c, i) => (
             <div key={i} className="text-xs">
-              <span className="font-medium">{c.authorName}</span>
+              <span className="font-medium">
+                {c.authorUrl ? (
+                  <a href={c.authorUrl} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">
+                    {c.authorName}
+                  </a>
+                ) : (
+                  c.authorName
+                )}
+              </span>
+              {c.authorHeadline && (
+                <span className="ml-1 text-[10px] text-muted-foreground">· {c.authorHeadline}</span>
+              )}
               {c.likes > 0 && (
                 <span className="ml-1 text-[10px] text-muted-foreground">· {fmt(c.likes)}♥</span>
               )}
@@ -569,25 +678,29 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
 
       {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
 
-      {result && (
-        <div className="space-y-3">
-          <div className="text-sm">
-            <span className="font-semibold tabular-nums">{result.count}</span> profile
-            {result.count === 1 ? "" : "s"} enriched
-          </div>
-          {result.profiles.length === 0 ? (
-            <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-              No profile data returned. Check the URLs and try again.
-            </p>
-          ) : (
-            result.profiles.map((p, i) => <ProfileCard key={p.publicIdentifier ?? p.url ?? i} profile={p} />)
-          )}
-          {result.notFound.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              No data for: {result.notFound.join(", ")}
-            </p>
-          )}
-        </div>
+      {result && <ProfileResults result={result} />}
+    </div>
+  );
+}
+
+function ProfileResults({ result }: { result: LinkedInProfilesResult }) {
+  return (
+    <div className="space-y-3">
+      <div className="text-sm">
+        <span className="font-semibold tabular-nums">{result.count}</span> profile
+        {result.count === 1 ? "" : "s"} enriched
+      </div>
+      {result.profiles.length === 0 ? (
+        <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
+          No profile data returned. Check the URLs and try again.
+        </p>
+      ) : (
+        result.profiles.map((p, i) => (
+          <ProfileCard key={p.publicIdentifier ?? p.url ?? i} profile={p} />
+        ))
+      )}
+      {result.notFound.length > 0 && (
+        <p className="text-xs text-muted-foreground">No data for: {result.notFound.join(", ")}</p>
       )}
     </div>
   );
