@@ -7,12 +7,9 @@ import {
   Bot,
   CreditCard,
   FileText,
-  Hash,
   Home,
-  Instagram,
   Layers,
   Link2,
-  Linkedin,
   MessageCircle,
   MessageSquare,
   Newspaper,
@@ -21,8 +18,13 @@ import {
   Settings,
   Sparkles,
   TrendingUp,
-  Youtube,
 } from "lucide-react";
+import {
+  InstagramLogo,
+  LinkedinLogo,
+  XLogo,
+  YoutubeLogo,
+} from "@/frontend/components/brand-logos";
 import { X } from "lucide-react";
 import { cn } from "@/shared/utils";
 import { Logo } from "@/frontend/components/marketing/logo";
@@ -46,11 +48,11 @@ const AGENTS = [
   { href: "/agents/content", label: "Content Writer", icon: FileText },
   { href: "/agents/reddit-sales", label: "Reddit Sales", icon: MessageCircle },
   { href: "/agents/hn", label: "Hacker News", icon: Newspaper },
-  { href: "/agents/x", label: "X / Twitter", icon: Hash },
-  { href: "/agents/linkedin", label: "LinkedIn", icon: Linkedin },
+  { href: "/agents/x", label: "X / Twitter", icon: XLogo },
+  { href: "/agents/linkedin", label: "LinkedIn", icon: LinkedinLogo },
   // Influencer + backlink modules — UI stubs for now, backend coming next.
-  { href: "/agents/youtube", label: "YT Creators", icon: Youtube },
-  { href: "/agents/instagram", label: "Insta Influencers", icon: Instagram },
+  { href: "/agents/youtube", label: "YT Creators", icon: YoutubeLogo },
+  { href: "/agents/instagram", label: "Insta Influencers", icon: InstagramLogo },
   { href: "/agents/backlink-marketplace", label: "Backlink Marketplace", icon: Link2 },
 ];
 

@@ -87,6 +87,8 @@ export type LinkedInMediaType = "image" | "video" | "article" | "document" | "no
 export type LinkedInComment = {
   authorName: string;
   authorHeadline: string | null;
+  /** Commenter's LinkedIn profile URL — used to enrich the people who engaged. */
+  authorUrl: string | null;
   text: string;
   likes: number;
   postedAgo: string | null;
@@ -459,6 +461,14 @@ function resolvePostMedia(o: Record<string, unknown>): {
 }
 
 /** Parse the nested per-post comment list the actor attaches when enabled. */
+/** Sum a reactionTypeCounts array (or fall back to a numeric likes field). */
+function sumReactionCounts(v: unknown): number {
+  if (Array.isArray(v)) {
+    return v.reduce((acc, r) => acc + asNum(asRecord(r).count), 0);
+  }
+  return asNum(v);
+}
+
 function parsePostComments(o: Record<string, unknown>): LinkedInComment[] {
   const raw = Array.isArray(o.comments)
     ? (o.comments as unknown[])
@@ -468,15 +478,26 @@ function parsePostComments(o: Record<string, unknown>): LinkedInComment[] {
   return raw
     .map((c) => {
       const cc = asRecord(c);
-      const author = asRecord(cc.author ?? cc.commenter);
-      const cEngagement = asRecord(cc.engagement);
-      const cPostedAt = asRecord(cc.postedAt ?? cc.createdAt);
+      // HarvestAPI nests the commenter under `actor`; older shapes used
+      // `author`/`commenter`. The real name lives there, not at top level.
+      const actor = asRecord(cc.actor ?? cc.author ?? cc.commenter);
+      const engagement = asRecord(cc.engagement);
+      const postedAt = asRecord(cc.postedAt);
       return {
-        authorName: asStr(author.name) ?? asStr(cc.authorName) ?? "LinkedIn member",
-        authorHeadline: asStr(author.info) ?? asStr(author.headline),
+        authorName:
+          asStr(actor.name) ||
+          [asStr(actor.firstName), asStr(actor.lastName)].filter(Boolean).join(" ").trim() ||
+          asStr(cc.authorName) ||
+          "LinkedIn member",
+        authorHeadline:
+          asStr(actor.position) ?? asStr(actor.info) ?? asStr(actor.headline),
+        authorUrl: asStr(actor.linkedinUrl) ?? asStr(actor.url),
         text: asStr(cc.commentary) ?? asStr(cc.content) ?? asStr(cc.text) ?? "",
-        likes: asNum(cEngagement.likes ?? cc.likes ?? cc.reactionsCount),
-        postedAgo: asStr(cPostedAt.postedAgoShort) ?? asStr(cc.postedAgo),
+        likes: sumReactionCounts(
+          cc.reactionTypeCounts ?? engagement.likes ?? cc.likes ?? cc.reactionsCount
+        ),
+        postedAgo:
+          asStr(postedAt.postedAgoShort) ?? asStr(cc.postedAgo) ?? asStr(cc.createdAt),
       };
     })
     .filter((c) => c.text.length > 0)
