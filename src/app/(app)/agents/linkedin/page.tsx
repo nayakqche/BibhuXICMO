@@ -20,6 +20,22 @@ function brandSlugFromUrl(url: string | null): string {
   }
 }
 
+/**
+ * Default target for the company-posts tool. Prefer the LinkedIn handle the
+ * user saved in their social handles (the AI CMO "socials" section) so the
+ * agent uses the correct page instead of a guess from the website domain.
+ */
+function defaultCompanyTarget(workspace: {
+  websiteUrl: string | null;
+  voiceProfile: unknown;
+}): string {
+  const handle = (
+    workspace.voiceProfile as { socialHandles?: { linkedin?: string } } | null
+  )?.socialHandles?.linkedin;
+  if (handle && handle.trim()) return handle.trim();
+  return brandSlugFromUrl(workspace.websiteUrl);
+}
+
 export default async function LinkedInAgentPage() {
   const { workspace } = await requireWorkspace();
   const [drafts, runs] = await Promise.all([
@@ -47,7 +63,7 @@ export default async function LinkedInAgentPage() {
       extras={
         <div className="space-y-6">
           <LinkedInTools
-            defaultCompany={brandSlugFromUrl(workspace.websiteUrl)}
+            defaultCompany={defaultCompanyTarget(workspace)}
             hasApifyToken={hasLinkedInApifyToken()}
           />
           <LinkedInComposer />

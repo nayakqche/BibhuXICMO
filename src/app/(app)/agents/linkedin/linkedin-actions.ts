@@ -50,9 +50,14 @@ export async function startProfileAction(args: {
 
 export async function startProfilesAction(args: {
   queries: string[];
+  findEmail?: boolean;
 }): Promise<CachedLinkedInResult<LinkedInProfilesResult>> {
   const { workspace } = await requireWorkspace();
-  const res = await runProfiles({ workspaceId: workspace.id, queries: args.queries });
+  const res = await runProfiles({
+    workspaceId: workspace.id,
+    queries: args.queries,
+    findEmail: args.findEmail,
+  });
   if (res.ok && !("pending" in res)) revalidatePath("/agents/linkedin");
   return res;
 }
