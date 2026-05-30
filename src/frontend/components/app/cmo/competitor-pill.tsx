@@ -30,7 +30,7 @@ export function CompetitorPill({
   size?: "sm" | "md";
 }) {
   const { name, domain } = parseCompetitor(competitor);
-  const [imgOk, setImgOk] = useState(true);
+  const [iconStep, setIconStep] = useState(0);
   const px = size === "sm" ? 14 : 18;
   const containerSize = size === "sm" ? "h-6" : "h-7";
   const textSize = size === "sm" ? "text-[11px]" : "text-xs";
@@ -51,15 +51,19 @@ export function CompetitorPill({
         className="flex shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted"
         style={{ width: px, height: px }}
       >
-        {imgOk && domain ? (
+        {domain && iconStep < 2 ? (
           <Image
-            src={`https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`}
+            src={
+              iconStep === 0
+                ? `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`
+                : `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`
+            }
             alt=""
             width={px}
             height={px}
             unoptimized
             className="h-full w-full object-cover"
-            onError={() => setImgOk(false)}
+            onError={() => setIconStep((step) => step + 1)}
           />
         ) : (
           <span
@@ -79,20 +83,29 @@ function parseCompetitor(raw: string): { name: string; domain: string | null } {
   const input = raw.trim();
   if (!input) return { name: raw, domain: null };
 
-  // 1. "Name (domain.tld)" — preferred Claude output format
+  // Split off the display name + any "(domain.tld)" the strategy LLM appended.
+  let name = input;
+  let parenDomain: string | null = null;
   const parenMatch = input.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
   if (parenMatch) {
-    const name = parenMatch[1].trim();
-    const domain = stripScheme(parenMatch[2]).split("/")[0]?.toLowerCase() ?? null;
-    if (domain && /\./.test(domain)) return { name, domain };
+    name = parenMatch[1].trim();
+    const d = (stripScheme(parenMatch[2]).split("/")[0] ?? "").toLowerCase().replace(/^www\./, "");
+    if (/\./.test(d)) parenDomain = d;
   }
 
-  // 2. Already a URL or bare domain like "jasper.ai" / "https://jasper.ai/foo"
+  // 1. Curated map is hand-verified, so it WINS over the LLM's parenthetical
+  //    guess (which is often wrong, e.g. "Atria (atria.ai)" → tryatria.com).
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const mapped = BRAND_DOMAIN_MAP[normalized];
+  if (mapped) return { name, domain: mapped };
+
+  // 2. Otherwise trust the LLM-supplied parenthetical domain.
+  if (parenDomain) return { name, domain: parenDomain };
+
+  // 3. Bare domain / full URL input ("jasper.ai" / "https://jasper.ai/foo").
   const stripped = stripScheme(input);
   const firstToken = stripped.split("/")[0];
   if (firstToken && /\.[a-z]{2,}$/i.test(firstToken)) {
-    // If the whole input is just the domain, use the bare domain as the name too
-    // — otherwise the display would look like "jasper.ai · jasper.ai".
     const isPureDomain = stripped === firstToken || stripped === firstToken + "/";
     return {
       name: isPureDomain ? firstToken.replace(/^www\./, "") : input,
@@ -100,14 +113,7 @@ function parseCompetitor(raw: string): { name: string; domain: string | null } {
     };
   }
 
-  // 3. Curated map for the most common SaaS / marketing brands the strategy
-  //    LLM tends to mention. Keys are normalized (lowercase, alphanumeric).
-  const normalized = input.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const mapped = BRAND_DOMAIN_MAP[normalized];
-  if (mapped) return { name: input, domain: mapped };
-
-  // 4. Last-resort heuristic: slugify + ".com". Wrong for some (jasper.ai,
-  //    notion.so, etc.) but better than no favicon at all.
+  // 4. Last-resort heuristic: slugify + ".com".
   if (normalized.length === 0) return { name: input, domain: null };
   return { name: input, domain: `${normalized}.com` };
 }
@@ -127,6 +133,21 @@ function stripScheme(s: string): string {
  * logos before the LLM-supplied parenthetical kicks in.
  */
 const BRAND_DOMAIN_MAP: Record<string, string> = {
+  // Ad-creative / creative-analytics competitors
+  atria: "tryatria.com",
+  tryatria: "tryatria.com",
+  adcreative: "adcreative.ai",
+  adcreativeai: "adcreative.ai",
+  canva: "canva.com",
+  foreplay: "foreplay.co",
+  foreplayco: "foreplay.co",
+  motion: "motionapp.com",
+  motionapp: "motionapp.com",
+  pencil: "trypencil.com",
+  creatify: "creatify.ai",
+  arcads: "arcads.ai",
+  icon: "icon.com",
+
   // AI writing / content
   jasperai: "jasper.ai",
   jasper: "jasper.ai",
