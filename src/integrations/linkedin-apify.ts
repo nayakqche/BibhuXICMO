@@ -6,15 +6,16 @@
  * a posts pull can exceed that):
  *
  *   - PROFILE        harvestapi/linkedin-profile-scraper
- *                    input: { url | publicIdentifier | profileId }
- *                    output: one item { element: {...profile...}, query, status }
+ *                    input: { url | publicIdentifier | profileId } for one,
+ *                    or { queries: [...] } for bulk lookups
+ *                    output: one item per profile { element: {...profile...} }
  *                    ~$4 / 1k profiles.
  *
  *   - COMPANY_POSTS  harvestapi/linkedin-company-posts
  *                    input: { targetUrls[], maxPosts, includeReposts, ... }
  *                    output: N post items { type, id, content, author, engagement }
  *                    ~$2 / 1k posts. Reactions/comments bill as separate
- *                    items, so we keep them OFF.
+ *                    items, so they are opt-in per scan.
  *
  * Each actor uses its own Apify token so they can bill separately. Token
  * resolution per actor:
@@ -80,6 +81,17 @@ export function hasLinkedInApifyToken(): boolean {
 // Normalized output shapes
 // --------------------------------------------------------------------------
 
+/** image | video | article | document | none */
+export type LinkedInMediaType = "image" | "video" | "article" | "document" | "none";
+
+export type LinkedInComment = {
+  authorName: string;
+  authorHeadline: string | null;
+  text: string;
+  likes: number;
+  postedAgo: string | null;
+};
+
 export type LinkedInPost = {
   id: string;
   url: string;
@@ -98,12 +110,22 @@ export type LinkedInPost = {
   /** post | repost | quote | article | … */
   type: string | null;
   hasMedia: boolean;
+  /** Kind of attached media, when present. */
+  mediaType: LinkedInMediaType;
+  /** Best-effort thumbnail/preview URL for the attached media. */
+  mediaUrl: string | null;
   topReactions: Array<{ type: string; count: number }>;
+  /** Populated only when comment scraping is enabled. */
+  topComments: LinkedInComment[];
 };
 
 export type LinkedInCompanyPostsResult = {
   targets: string[];
   totalPosts: number;
+  /** Whether reactions were scraped for this pull. */
+  scrapedReactions: boolean;
+  /** Whether comments were scraped for this pull. */
+  scrapedComments: boolean;
   posts: LinkedInPost[];
 };
 
@@ -147,6 +169,14 @@ export type LinkedInProfile = {
 export type LinkedInProfileResult = {
   query: string;
   profile: LinkedInProfile | null;
+};
+
+export type LinkedInProfilesResult = {
+  queries: string[];
+  count: number;
+  profiles: LinkedInProfile[];
+  /** Queries that returned no profile data. */
+  notFound: string[];
 };
 
 // --------------------------------------------------------------------------
@@ -296,6 +326,12 @@ export type CompanyPostsInput = {
   maxPosts: number;
   includeReposts: boolean;
   includeQuotePosts: boolean;
+  /** Scrape per-post reaction breakdown. Bills each reaction as an item. */
+  scrapeReactions: boolean;
+  /** Scrape top comments per post. Bills each comment as an item. */
+  scrapeComments: boolean;
+  /** Max comments captured per post when scrapeComments is on. */
+  maxComments: number;
 };
 
 export function startCompanyPostsRun(input: CompanyPostsInput): Promise<ApifyRunHandle> {
@@ -306,9 +342,12 @@ export function startCompanyPostsRun(input: CompanyPostsInput): Promise<ApifyRun
       maxPosts: input.maxPosts,
       includeReposts: input.includeReposts,
       includeQuotePosts: input.includeQuotePosts,
-      // Keep these OFF — each reaction/comment is billed as its own item.
-      scrapeReactions: false,
-      scrapeComments: false,
+      // Reactions/comments are billed as separate dataset items, so these are
+      // opt-in per scan. When on, the actor also nests them inside each post.
+      scrapeReactions: input.scrapeReactions,
+      postNestedReactions: input.scrapeReactions,
+      scrapeComments: input.scrapeComments,
+      maxComments: input.scrapeComments ? input.maxComments : 0,
     },
     "posts"
   );
@@ -319,6 +358,14 @@ export function startProfileRun(query: { url?: string; publicIdentifier?: string
   if (query.url) input.url = query.url;
   if (query.publicIdentifier) input.publicIdentifier = query.publicIdentifier;
   return startRun(env.APIFY_LINKEDIN_PROFILE_ACTOR_ID, input, "profile");
+}
+
+/**
+ * Bulk profile scrape: the harvestapi profile actor accepts a `queries` array
+ * of profile URLs or public identifiers and returns one item per profile.
+ */
+export function startProfilesRun(queries: string[]): Promise<ApifyRunHandle> {
+  return startRun(env.APIFY_LINKEDIN_PROFILE_ACTOR_ID, { queries }, "profile");
 }
 
 // --------------------------------------------------------------------------
@@ -342,15 +389,89 @@ function asStr(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v : null;
 }
 
+/** Resolve the attached-media kind + a preview URL from a raw post object. */
+function resolvePostMedia(o: Record<string, unknown>): {
+  hasMedia: boolean;
+  mediaType: LinkedInMediaType;
+  mediaUrl: string | null;
+} {
+  const images = Array.isArray(o.postImages) ? (o.postImages as unknown[]) : [];
+  const video = asRecord(o.postVideo);
+
+  if (asStr(video.videoUrl) || asStr(video.thumbnailUrl)) {
+    return {
+      hasMedia: true,
+      mediaType: "video",
+      mediaUrl: asStr(video.thumbnailUrl) ?? asStr(video.videoUrl),
+    };
+  }
+  if (o.linkedinVideo || o.video) {
+    const v = asRecord(o.linkedinVideo ?? o.video);
+    return {
+      hasMedia: true,
+      mediaType: "video",
+      mediaUrl: asStr(v.thumbnailUrl) ?? asStr(v.url),
+    };
+  }
+  if (images.length > 0) {
+    const first = asRecord(images[0]);
+    return { hasMedia: true, mediaType: "image", mediaUrl: asStr(first.url) };
+  }
+  const article = asRecord(o.article);
+  if (asStr(article.title) || asStr(article.link)) {
+    const img = asRecord(article.image);
+    return {
+      hasMedia: true,
+      mediaType: "article",
+      mediaUrl: asStr(img.url) ?? asStr(article.link),
+    };
+  }
+  if (o.document) {
+    const doc = asRecord(o.document);
+    return {
+      hasMedia: true,
+      mediaType: "document",
+      mediaUrl: asStr(doc.url) ?? asStr(doc.transcribedDocumentUrl),
+    };
+  }
+  return { hasMedia: false, mediaType: "none", mediaUrl: null };
+}
+
+/** Parse the nested per-post comment list the actor attaches when enabled. */
+function parsePostComments(o: Record<string, unknown>): LinkedInComment[] {
+  const raw = Array.isArray(o.comments)
+    ? (o.comments as unknown[])
+    : Array.isArray(o.postComments)
+      ? (o.postComments as unknown[])
+      : [];
+  return raw
+    .map((c) => {
+      const cc = asRecord(c);
+      const author = asRecord(cc.author ?? cc.commenter);
+      const cEngagement = asRecord(cc.engagement);
+      const cPostedAt = asRecord(cc.postedAt ?? cc.createdAt);
+      return {
+        authorName: asStr(author.name) ?? asStr(cc.authorName) ?? "LinkedIn member",
+        authorHeadline: asStr(author.info) ?? asStr(author.headline),
+        text: asStr(cc.commentary) ?? asStr(cc.content) ?? asStr(cc.text) ?? "",
+        likes: asNum(cEngagement.likes ?? cc.likes ?? cc.reactionsCount),
+        postedAgo: asStr(cPostedAt.postedAgoShort) ?? asStr(cc.postedAgo),
+      };
+    })
+    .filter((c) => c.text.length > 0)
+    .slice(0, 10);
+}
+
 export function normalizeCompanyPosts(
   items: unknown[],
-  targets: string[]
+  targets: string[],
+  opts?: { scrapedReactions?: boolean; scrapedComments?: boolean }
 ): LinkedInCompanyPostsResult {
   const posts: LinkedInPost[] = [];
   for (const raw of items) {
     const o = asRecord(raw);
-    // Skip non-post items (comments/reactions appear as separate items if
-    // ever enabled; they have no top-level `content` + `author` shape).
+    // Skip non-post items (comments/reactions are pushed as separate dataset
+    // items when their scraping is enabled; we read the nested copies instead).
     const type = asStr(o.type);
     if (type && (type === "comment" || type === "reaction")) continue;
 
@@ -359,7 +480,9 @@ export function normalizeCompanyPosts(
     const engagement = asRecord(o.engagement);
     const reactionsRaw = Array.isArray(engagement.reactions)
       ? (engagement.reactions as unknown[])
-      : [];
+      : Array.isArray(o.reactions)
+        ? (o.reactions as unknown[])
+        : [];
 
     const likes = asNum(engagement.likes);
     const comments = asNum(engagement.comments);
@@ -369,11 +492,7 @@ export function normalizeCompanyPosts(
     const url = asStr(o.linkedinUrl) ?? "";
     if (!url && !id) continue;
 
-    const hasMedia =
-      (Array.isArray(o.postImages) && (o.postImages as unknown[]).length > 0) ||
-      !!o.document ||
-      !!o.video ||
-      !!o.linkedinVideo;
+    const media = resolvePostMedia(o);
 
     posts.push({
       id: id || url,
@@ -389,31 +508,43 @@ export function normalizeCompanyPosts(
       shares,
       totalEngagement: likes + comments + shares,
       type,
-      hasMedia,
+      hasMedia: media.hasMedia,
+      mediaType: media.mediaType,
+      mediaUrl: media.mediaUrl,
       topReactions: reactionsRaw
         .map((r) => {
           const rr = asRecord(r);
           return { type: asStr(rr.type) ?? "", count: asNum(rr.count) };
         })
         .filter((r) => r.type.length > 0)
+        .sort((a, b) => b.count - a.count)
         .slice(0, 6),
+      topComments: parsePostComments(o),
     });
   }
 
   posts.sort((a, b) => b.totalEngagement - a.totalEngagement);
-  return { targets, totalPosts: posts.length, posts };
+  return {
+    targets,
+    totalPosts: posts.length,
+    scrapedReactions: opts?.scrapedReactions ?? false,
+    scrapedComments: opts?.scrapedComments ?? false,
+    posts,
+  };
 }
 
-export function normalizeProfile(
-  items: unknown[],
-  query: string
-): LinkedInProfileResult {
-  // Profile actor returns a single item shaped { element: {...}, query, ... }.
-  // Some builds return the profile fields at the top level — handle both.
-  const first = asRecord(items[0]);
+/**
+ * Normalize one profile dataset item (shaped `{ element: {...}, query }` on
+ * most builds, or the profile fields at the top level on others).
+ * Returns null when the item carries no usable profile data.
+ */
+function normalizeProfileElement(raw: unknown): LinkedInProfile | null {
+  const first = asRecord(raw);
   const el = asRecord(first.element ?? first);
-  if (!el || Object.keys(el).length === 0) {
-    return { query, profile: null };
+  if (!el || Object.keys(el).length === 0) return null;
+  // Some builds wrap misses as items with only a `query`/`status`.
+  if (!el.firstName && !el.lastName && !el.name && !el.publicIdentifier && !el.headline) {
+    return null;
   }
 
   const location = asRecord(el.location);
@@ -469,29 +600,51 @@ export function normalizeProfile(
     "LinkedIn member";
 
   return {
-    query,
-    profile: {
-      publicIdentifier: asStr(el.publicIdentifier),
-      fullName,
-      firstName,
-      lastName,
-      headline: asStr(el.headline),
-      about: asStr(el.about),
-      url: asStr(el.linkedinUrl),
-      photo: asStr(el.photo),
-      location: asStr(parsed.text) ?? asStr(location.linkedinText),
-      countryCode: asStr(parsed.countryCode) ?? asStr(location.countryCode),
-      connections: el.connectionsCount != null ? asNum(el.connectionsCount) : null,
-      followers: el.followerCount != null ? asNum(el.followerCount) : null,
-      openToWork: el.openToWork === true,
-      hiring: el.hiring === true,
-      topSkills: asStr(el.topSkills),
-      currentCompany: asStr(currentPos.companyName),
-      experience,
-      education,
-      skills,
-      languages,
-      verified: el.verified === true,
-    },
+    publicIdentifier: asStr(el.publicIdentifier),
+    fullName,
+    firstName,
+    lastName,
+    headline: asStr(el.headline),
+    about: asStr(el.about),
+    url: asStr(el.linkedinUrl),
+    photo: asStr(el.photo),
+    location: asStr(parsed.text) ?? asStr(location.linkedinText),
+    countryCode: asStr(parsed.countryCode) ?? asStr(location.countryCode),
+    connections: el.connectionsCount != null ? asNum(el.connectionsCount) : null,
+    followers: el.followerCount != null ? asNum(el.followerCount) : null,
+    openToWork: el.openToWork === true,
+    hiring: el.hiring === true,
+    topSkills: asStr(el.topSkills),
+    currentCompany: asStr(currentPos.companyName),
+    experience,
+    education,
+    skills,
+    languages,
+    verified: el.verified === true,
   };
+}
+
+export function normalizeProfile(
+  items: unknown[],
+  query: string
+): LinkedInProfileResult {
+  return { query, profile: normalizeProfileElement(items[0]) };
+}
+
+/** Normalize a bulk profile dataset into a deduped list of profiles. */
+export function normalizeProfiles(
+  items: unknown[],
+  queries: string[]
+): LinkedInProfilesResult {
+  const profiles: LinkedInProfile[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const p = normalizeProfileElement(raw);
+    if (!p) continue;
+    const key = (p.publicIdentifier ?? p.url ?? p.fullName).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    profiles.push(p);
+  }
+  return { queries, count: profiles.length, profiles, notFound: [] };
 }
