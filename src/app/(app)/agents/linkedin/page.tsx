@@ -22,7 +22,7 @@ function brandSlugFromUrl(url: string | null): string {
 
 export default async function LinkedInAgentPage() {
   const { workspace } = await requireWorkspace();
-  const [drafts, runs, integration] = await Promise.all([
+  const [drafts, runs] = await Promise.all([
     prisma.contentDraft.findMany({
       where: { workspaceId: workspace.id, agent: "linkedin" },
       orderBy: { createdAt: "desc" },
@@ -32,9 +32,6 @@ export default async function LinkedInAgentPage() {
       where: { workspaceId: workspace.id, agent: "linkedin" },
       orderBy: { startedAt: "desc" },
       take: 8,
-    }),
-    prisma.integration.findUnique({
-      where: { workspaceId_provider: { workspaceId: workspace.id, provider: "LINKEDIN" } },
     }),
   ]);
 
@@ -46,8 +43,7 @@ export default async function LinkedInAgentPage() {
       agentId="linkedin"
       drafts={drafts}
       runs={runs}
-      connected={!!integration}
-      connectSlug="linkedin"
+      connected
       extras={
         <div className="space-y-6">
           <LinkedInTools

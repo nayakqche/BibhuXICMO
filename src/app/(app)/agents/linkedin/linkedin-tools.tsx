@@ -2,15 +2,20 @@
 
 import { useState, useTransition } from "react";
 import {
-  Bot,
   Building2,
   ExternalLink,
+  FileText,
   Heart,
+  Image as ImageIcon,
   Loader2,
   MessageSquare,
+  Newspaper,
   Repeat2,
   Sparkles,
+  ThumbsUp,
   UserSearch,
+  Users,
+  Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
@@ -21,12 +26,13 @@ import {
   CardTitle,
 } from "@/frontend/components/ui/card";
 import { Input } from "@/frontend/components/ui/input";
+import { Textarea } from "@/frontend/components/ui/textarea";
 import { Label } from "@/frontend/components/ui/label";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import {
   startCompanyPostsAction,
-  startProfileAction,
+  startProfilesAction,
   pollLinkedInToolAction,
   analyzeCompanyPostsAction,
   draftProfileOutreachAction,
@@ -35,8 +41,10 @@ import {
 } from "./linkedin-actions";
 import type {
   LinkedInCompanyPostsResult,
-  LinkedInProfileResult,
+  LinkedInProfilesResult,
   LinkedInProfile,
+  LinkedInPost,
+  LinkedInMediaType,
 } from "@/integrations/linkedin-apify";
 import type { LinkedInPollInput } from "@/backend/linkedin-tools";
 
@@ -49,6 +57,14 @@ function fmt(n: number | null | undefined): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
+
+const MEDIA_META: Record<LinkedInMediaType, { label: string; Icon: React.ElementType } | null> = {
+  image: { label: "Image", Icon: ImageIcon },
+  video: { label: "Video", Icon: Video },
+  article: { label: "Article", Icon: Newspaper },
+  document: { label: "Document", Icon: FileText },
+  none: null,
+};
 
 function RunningPanel({ elapsedMs, statusMsg }: { elapsedMs: number; statusMsg?: string }) {
   const seconds = Math.floor(elapsedMs / 1000);
@@ -119,21 +135,59 @@ export function LinkedInTools({
         <Tabs defaultValue="company">
           <TabsList>
             <TabsTrigger value="company" className="gap-1.5">
-              <Building2 className="h-3.5 w-3.5" /> Company insights
+              <Building2 className="h-3.5 w-3.5" /> Company posts
             </TabsTrigger>
             <TabsTrigger value="profile" className="gap-1.5">
-              <UserSearch className="h-3.5 w-3.5" /> Profile enrichment
+              <Users className="h-3.5 w-3.5" /> Bulk profiles
             </TabsTrigger>
           </TabsList>
           <TabsContent value="company" className="mt-4">
             <CompanyInsightsTool defaultCompany={defaultCompany} disabled={!hasApifyToken} />
           </TabsContent>
           <TabsContent value="profile" className="mt-4">
-            <ProfileEnrichmentTool disabled={!hasApifyToken} />
+            <BulkProfileTool disabled={!hasApifyToken} />
           </TabsContent>
         </Tabs>
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small checkbox toggle (no extra dependency).
+function Toggle({
+  id,
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-start gap-2 text-sm select-none"
+    >
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary disabled:opacity-50"
+      />
+      <span>
+        <span className="font-medium">{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
+    </label>
   );
 }
 
@@ -147,6 +201,8 @@ function CompanyInsightsTool({
 }) {
   const [target, setTarget] = useState(defaultCompany);
   const [maxPosts, setMaxPosts] = useState(25);
+  const [scrapeReactions, setScrapeReactions] = useState(false);
+  const [scrapeComments, setScrapeComments] = useState(false);
   const [data, setData] = useState<LinkedInCompanyPostsResult | null>(null);
   const [insights, setInsights] = useState<CompanyPostsInsights | null>(null);
   const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
@@ -166,7 +222,13 @@ function CompanyInsightsTool({
         .split(/[\n,]/)
         .map((t) => t.trim())
         .filter(Boolean);
-      const res = await startCompanyPostsAction({ targets, maxPosts, includeReposts: true });
+      const res = await startCompanyPostsAction({
+        targets,
+        maxPosts,
+        includeReposts: true,
+        scrapeReactions,
+        scrapeComments,
+      });
       if (!res.ok) {
         toast.error("Scan failed", { description: res.error, duration: 8000 });
         return;
@@ -179,6 +241,8 @@ function CompanyInsightsTool({
             targets,
             maxPosts,
             includeReposts: true,
+            scrapeReactions,
+            scrapeComments,
             runId: res.runId,
             datasetId: res.datasetId,
           }),
@@ -213,6 +277,10 @@ function CompanyInsightsTool({
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Extract posts from LinkedIn companies — content, media, engagement and
+        more. No cookies or account required.
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_120px_auto]">
         <div>
           <Label htmlFor="li-company">Company or profile URL(s)</Label>
@@ -249,6 +317,25 @@ function CompanyInsightsTool({
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <Toggle
+          id="li-reactions"
+          label="Scrape reactions"
+          hint="Per-post reaction breakdown (extra Apify cost)"
+          checked={scrapeReactions}
+          onChange={setScrapeReactions}
+          disabled={pending || disabled}
+        />
+        <Toggle
+          id="li-comments"
+          label="Scrape comments"
+          hint="Top comments per post (extra Apify cost)"
+          checked={scrapeComments}
+          onChange={setScrapeComments}
+          disabled={pending || disabled}
+        />
+      </div>
+
       {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
 
       {data && (
@@ -272,30 +359,7 @@ function CompanyInsightsTool({
             ) : (
               <ul className="space-y-2">
                 {data.posts.slice(0, 12).map((p) => (
-                  <li key={p.id} className="rounded-md border bg-card p-3 text-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">{p.authorName}</span>
-                          {p.postedAgo && <span>· {p.postedAgo}</span>}
-                          {p.type && p.type !== "post" && (
-                            <Badge variant="outline" className="text-[10px]">{p.type}</Badge>
-                          )}
-                        </div>
-                        <p className="mt-1 line-clamp-3 whitespace-pre-wrap">{p.content || "(no text)"}</p>
-                      </div>
-                      {p.url && (
-                        <a href={p.url} target="_blank" rel="noreferrer" className="shrink-0 text-muted-foreground hover:text-primary">
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      )}
-                    </div>
-                    <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
-                      <span className="flex items-center gap-1"><Heart className="h-3 w-3" /> {fmt(p.likes)}</span>
-                      <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" /> {fmt(p.comments)}</span>
-                      <span className="flex items-center gap-1"><Repeat2 className="h-3 w-3" /> {fmt(p.shares)}</span>
-                    </div>
-                  </li>
+                  <PostRow key={p.id} post={p} />
                 ))}
               </ul>
             )}
@@ -305,6 +369,69 @@ function CompanyInsightsTool({
         </Card>
       )}
     </div>
+  );
+}
+
+function PostRow({ post: p }: { post: LinkedInPost }) {
+  const media = MEDIA_META[p.mediaType];
+  return (
+    <li className="rounded-md border bg-card p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{p.authorName}</span>
+            {p.postedAgo && <span>· {p.postedAgo}</span>}
+            {p.type && p.type !== "post" && (
+              <Badge variant="outline" className="text-[10px]">{p.type}</Badge>
+            )}
+            {media && (
+              <Badge variant="secondary" className="gap-1 text-[10px]">
+                <media.Icon className="h-3 w-3" /> {media.label}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 line-clamp-3 whitespace-pre-wrap">{p.content || "(no text)"}</p>
+        </div>
+        {p.url && (
+          <a href={p.url} target="_blank" rel="noreferrer" className="shrink-0 text-muted-foreground hover:text-primary">
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1"><Heart className="h-3 w-3" /> {fmt(p.likes)}</span>
+        <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" /> {fmt(p.comments)}</span>
+        <span className="flex items-center gap-1"><Repeat2 className="h-3 w-3" /> {fmt(p.shares)}</span>
+      </div>
+
+      {p.topReactions.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <ThumbsUp className="h-3 w-3 text-muted-foreground" />
+          {p.topReactions.map((r) => (
+            <Badge key={r.type} variant="outline" className="text-[10px] capitalize">
+              {r.type.toLowerCase()} {fmt(r.count)}
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {p.topComments.length > 0 && (
+        <div className="mt-2 space-y-1.5 rounded-md border bg-muted/30 p-2">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Top comments
+          </div>
+          {p.topComments.slice(0, 5).map((c, i) => (
+            <div key={i} className="text-xs">
+              <span className="font-medium">{c.authorName}</span>
+              {c.likes > 0 && (
+                <span className="ml-1 text-[10px] text-muted-foreground">· {fmt(c.likes)}♥</span>
+              )}
+              <p className="line-clamp-2 whitespace-pre-wrap text-muted-foreground">{c.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -351,24 +478,25 @@ function InsightsBlock({ insights }: { insights: CompanyPostsInsights }) {
 }
 
 // ---------------------------------------------------------------------------
-function ProfileEnrichmentTool({ disabled }: { disabled: boolean }) {
+function BulkProfileTool({ disabled }: { disabled: boolean }) {
   const [query, setQuery] = useState("");
-  const [profile, setProfile] = useState<LinkedInProfile | null>(null);
-  const [outreach, setOutreach] = useState<ProfileOutreach | null>(null);
+  const [result, setResult] = useState<LinkedInProfilesResult | null>(null);
   const [progress, setProgress] = useState<{ elapsedMs: number; statusMsg?: string } | null>(null);
   const [pending, startTransition] = useTransition();
-  const [drafting, startDraft] = useTransition();
 
   function run() {
-    if (!query.trim()) {
-      toast.error("Enter a LinkedIn profile URL");
+    const queries = query
+      .split(/[\n,]/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (queries.length === 0) {
+      toast.error("Enter at least one LinkedIn profile URL");
       return;
     }
     startTransition(async () => {
-      setProfile(null);
-      setOutreach(null);
+      setResult(null);
       setProgress(null);
-      const res = await startProfileAction({ query });
+      const res = await startProfilesAction({ queries });
       if (!res.ok) {
         toast.error("Lookup failed", { description: res.error, duration: 8000 });
         return;
@@ -377,8 +505,8 @@ function ProfileEnrichmentTool({ disabled }: { disabled: boolean }) {
         setProgress({ elapsedMs: 0 });
         const final = await pollUntilDone(
           () => ({
-            type: "PROFILE",
-            query: query.trim(),
+            type: "PROFILES",
+            queries,
             runId: res.runId,
             datasetId: res.datasetId,
           }),
@@ -389,26 +517,76 @@ function ProfileEnrichmentTool({ disabled }: { disabled: boolean }) {
           toast.error("Apify run failed", { description: final.error, duration: 9000 });
           return;
         }
-        const result = final.data as LinkedInProfileResult;
-        if (!result.profile) {
-          toast.error("No profile data returned for that URL.");
-          return;
-        }
-        setProfile(result.profile);
-        toast.success("Profile enriched");
+        const data = final.data as LinkedInProfilesResult;
+        setResult(data);
+        toast.success(`Enriched ${data.count} profile${data.count === 1 ? "" : "s"}`);
         return;
       }
-      if (!res.data.profile) {
-        toast.error("No profile data returned for that URL.");
-        return;
-      }
-      setProfile(res.data.profile);
-      toast.success(res.fromCache ? "Loaded from cache" : "Profile enriched");
+      setResult(res.data);
+      toast.success(
+        res.fromCache
+          ? "Loaded from cache"
+          : `Enriched ${res.data.count} profile${res.data.count === 1 ? "" : "s"}`
+      );
     });
   }
 
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Extract detailed information from LinkedIn profiles in bulk — complete
+        work experience, education history, skills and more.
+      </p>
+      <div>
+        <Label htmlFor="li-profiles">LinkedIn profile URLs</Label>
+        <Textarea
+          id="li-profiles"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={"linkedin.com/in/williamhgates\nlinkedin.com/in/satyanadella\n(one per line or comma-separated, up to 20)"}
+          className="mt-1.5 min-h-[88px]"
+          disabled={pending || disabled}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">Up to 20 profiles per run.</span>
+        <Button onClick={run} disabled={pending || disabled} className="gap-2">
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserSearch className="h-4 w-4" />}
+          Enrich profiles
+        </Button>
+      </div>
+
+      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
+
+      {result && (
+        <div className="space-y-3">
+          <div className="text-sm">
+            <span className="font-semibold tabular-nums">{result.count}</span> profile
+            {result.count === 1 ? "" : "s"} enriched
+          </div>
+          {result.profiles.length === 0 ? (
+            <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
+              No profile data returned. Check the URLs and try again.
+            </p>
+          ) : (
+            result.profiles.map((p, i) => <ProfileCard key={p.publicIdentifier ?? p.url ?? i} profile={p} />)
+          )}
+          {result.notFound.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              No data for: {result.notFound.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileCard({ profile }: { profile: LinkedInProfile }) {
+  const [outreach, setOutreach] = useState<ProfileOutreach | null>(null);
+  const [drafting, startDraft] = useTransition();
+
   function draft() {
-    if (!profile) return;
     startDraft(async () => {
       const res = await draftProfileOutreachAction({ profile });
       if (!res.ok) {
@@ -421,105 +599,95 @@ function ProfileEnrichmentTool({ disabled }: { disabled: boolean }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
-        <div>
-          <Label htmlFor="li-profile">LinkedIn profile URL</Label>
-          <Input
-            id="li-profile"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="linkedin.com/in/williamhgates"
-            className="mt-1.5"
-            disabled={pending || disabled}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") run();
-            }}
-          />
-        </div>
-        <div className="flex items-end">
-          <Button onClick={run} disabled={pending || disabled} className="gap-2">
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserSearch className="h-4 w-4" />}
-            Enrich
+    <Card className="bg-muted/20">
+      <CardContent className="space-y-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-base font-semibold">{profile.fullName}</span>
+              {profile.verified && <Badge variant="success" className="text-[10px]">verified</Badge>}
+              {profile.openToWork && <Badge variant="outline" className="text-[10px]">open to work</Badge>}
+              {profile.url && (
+                <a href={profile.url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
+            {profile.headline && <p className="text-sm text-muted-foreground">{profile.headline}</p>}
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+              {profile.location && <span>{profile.location}</span>}
+              {profile.currentCompany && <span>{profile.currentCompany}</span>}
+              {profile.connections != null && <span>{fmt(profile.connections)} connections</span>}
+              {profile.followers != null && <span>{fmt(profile.followers)} followers</span>}
+            </div>
+          </div>
+          <Button size="sm" variant="outline" onClick={draft} disabled={drafting} className="shrink-0 gap-1.5">
+            {drafting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            Draft outreach
           </Button>
         </div>
-      </div>
 
-      {progress && <RunningPanel elapsedMs={progress.elapsedMs} statusMsg={progress.statusMsg} />}
+        {profile.about && (
+          <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{profile.about}</p>
+        )}
 
-      {profile && (
-        <Card className="bg-muted/20">
-          <CardContent className="space-y-4 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-semibold">{profile.fullName}</span>
-                  {profile.verified && <Badge variant="success" className="text-[10px]">verified</Badge>}
-                  {profile.openToWork && <Badge variant="outline" className="text-[10px]">open to work</Badge>}
-                </div>
-                {profile.headline && <p className="text-sm text-muted-foreground">{profile.headline}</p>}
-                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                  {profile.location && <span>{profile.location}</span>}
-                  {profile.currentCompany && <span>{profile.currentCompany}</span>}
-                  {profile.connections != null && <span>{fmt(profile.connections)} connections</span>}
-                  {profile.followers != null && <span>{fmt(profile.followers)} followers</span>}
-                </div>
-              </div>
-              <Button size="sm" variant="outline" onClick={draft} disabled={drafting} className="shrink-0 gap-1.5">
-                {drafting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                Draft outreach
-              </Button>
+        {profile.experience.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground">Experience</div>
+            <ul className="mt-1 space-y-1 text-sm">
+              {profile.experience.slice(0, 5).map((e, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3">
+                  <span className="truncate">{e.position ?? "—"} · {e.company ?? "—"}</span>
+                  {e.duration && <span className="shrink-0 text-[11px] text-muted-foreground">{e.duration}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {profile.education.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground">Education</div>
+            <ul className="mt-1 space-y-1 text-sm">
+              {profile.education.slice(0, 4).map((e, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3">
+                  <span className="truncate">{e.school ?? "—"}{e.degree ? ` · ${e.degree}` : ""}</span>
+                  {e.period && <span className="shrink-0 text-[11px] text-muted-foreground">{e.period}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {profile.skills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {profile.skills.slice(0, 14).map((s) => (
+              <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+            ))}
+          </div>
+        )}
+
+        {outreach && (
+          <div className="space-y-3 rounded-md border border-primary/30 bg-primary/5 p-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-primary">Connection note</div>
+              <p className="mt-1 text-sm">{outreach.connectionNote}</p>
             </div>
-
-            {profile.about && (
-              <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{profile.about}</p>
-            )}
-
-            {profile.experience.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-muted-foreground">Follow-up DM</div>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{outreach.dm}</p>
+            </div>
+            {outreach.talkingPoints.length > 0 && (
               <div>
-                <div className="text-xs font-medium text-muted-foreground">Experience</div>
-                <ul className="mt-1 space-y-1 text-sm">
-                  {profile.experience.slice(0, 4).map((e, i) => (
-                    <li key={i} className="flex items-baseline justify-between gap-3">
-                      <span className="truncate">{e.position ?? "—"} · {e.company ?? "—"}</span>
-                      {e.duration && <span className="shrink-0 text-[11px] text-muted-foreground">{e.duration}</span>}
-                    </li>
-                  ))}
+                <div className="text-xs font-medium text-muted-foreground">Talking points</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
+                  {outreach.talkingPoints.map((t, i) => <li key={i}>{t}</li>)}
                 </ul>
               </div>
             )}
-
-            {profile.skills.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {profile.skills.slice(0, 12).map((s) => (
-                  <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
-                ))}
-              </div>
-            )}
-
-            {outreach && (
-              <div className="space-y-3 rounded-md border border-primary/30 bg-primary/5 p-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wider text-primary">Connection note</div>
-                  <p className="mt-1 text-sm">{outreach.connectionNote}</p>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground">Follow-up DM</div>
-                  <p className="mt-1 whitespace-pre-wrap text-sm">{outreach.dm}</p>
-                </div>
-                {outreach.talkingPoints.length > 0 && (
-                  <div>
-                    <div className="text-xs font-medium text-muted-foreground">Talking points</div>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
-                      {outreach.talkingPoints.map((t, i) => <li key={i}>{t}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

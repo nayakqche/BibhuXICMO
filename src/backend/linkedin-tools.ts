@@ -1,5 +1,5 @@
 /**
- * Async dispatcher + 24h DB cache for the LinkedIn agent's two Apify tools.
+ * Async dispatcher + 24h DB cache for the LinkedIn agent's Apify tools.
  *
  * Mirrors `seo-tools-cache.ts`:
  *   1. Start the Apify run (returns instantly).
@@ -7,6 +7,12 @@
  *   3. Client polls pollLinkedInToolAction.
  *   4. On SUCCEEDED we fetch + normalize + persist to `LinkedInScan`, so a
  *      repeat of the same input hits the cache and skips Apify entirely.
+ *
+ * Tools:
+ *   - COMPANY_POSTS  posts + engagement (+ optional reactions/comments) for
+ *                    one or more company/profile URLs.
+ *   - PROFILE        a single enriched profile.
+ *   - PROFILES       bulk profile enrichment for a list of URLs.
  */
 import { createHash } from "crypto";
 import type { Prisma, LinkedInScanType } from "@prisma/client";
@@ -19,18 +25,23 @@ import {
   isTerminalLinkedInStatus,
   startCompanyPostsRun,
   startProfileRun,
+  startProfilesRun,
   normalizeCompanyPosts,
   normalizeProfile,
+  normalizeProfiles,
   type LinkedInCompanyPostsResult,
   type LinkedInProfileResult,
+  type LinkedInProfilesResult,
 } from "@/integrations/linkedin-apify";
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const PENDING_MSG = "Scraping LinkedIn via Apify…";
 
-/** Hard cap so a single run can never balloon Apify spend. */
+/** Hard caps so a single run can never balloon Apify spend. */
 const MAX_POSTS_CAP = 50;
 const MAX_TARGETS = 5;
+const MAX_PROFILES = 20;
+const MAX_COMMENTS_CAP = 20;
 
 export type CachedLinkedInResult<T> =
   | { ok: true; data: T; cachedAt: Date; fromCache: boolean }
@@ -43,12 +54,20 @@ export type LinkedInPollInput =
       targets: string[];
       maxPosts: number;
       includeReposts: boolean;
+      scrapeReactions: boolean;
+      scrapeComments: boolean;
       runId: string;
       datasetId: string;
     }
   | {
       type: "PROFILE";
       query: string;
+      runId: string;
+      datasetId: string;
+    }
+  | {
+      type: "PROFILES";
+      queries: string[];
       runId: string;
       datasetId: string;
     };
@@ -58,7 +77,7 @@ export type LinkedInPollResult =
   | {
       ok: true;
       status: "DONE";
-      data: LinkedInCompanyPostsResult | LinkedInProfileResult;
+      data: LinkedInCompanyPostsResult | LinkedInProfileResult | LinkedInProfilesResult;
       cachedAt: Date;
     }
   | { ok: false; error: string };
@@ -171,6 +190,9 @@ export async function runCompanyPosts(args: {
   targets: string[];
   maxPosts?: number;
   includeReposts?: boolean;
+  scrapeReactions?: boolean;
+  scrapeComments?: boolean;
+  maxComments?: number;
 }): Promise<CachedLinkedInResult<LinkedInCompanyPostsResult>> {
   const targets = Array.from(
     new Set(args.targets.map(normalizeLinkedInTarget).filter(Boolean))
@@ -180,8 +202,11 @@ export async function runCompanyPosts(args: {
   }
   const maxPosts = Math.min(Math.max(args.maxPosts ?? 25, 1), MAX_POSTS_CAP);
   const includeReposts = args.includeReposts ?? true;
+  const scrapeReactions = args.scrapeReactions ?? false;
+  const scrapeComments = args.scrapeComments ?? false;
+  const maxComments = Math.min(Math.max(args.maxComments ?? 5, 1), MAX_COMMENTS_CAP);
 
-  const input = { targets, maxPosts, includeReposts };
+  const input = { targets, maxPosts, includeReposts, scrapeReactions, scrapeComments };
   const inputHash = hashInput({ ...input, type: "COMPANY_POSTS" });
 
   const cached = await readCached<LinkedInCompanyPostsResult>({
@@ -200,6 +225,9 @@ export async function runCompanyPosts(args: {
       maxPosts,
       includeReposts,
       includeQuotePosts: true,
+      scrapeReactions,
+      scrapeComments,
+      maxComments,
     });
     return {
       ok: true,
@@ -248,6 +276,42 @@ export async function runProfile(args: {
   }
 }
 
+export async function runProfiles(args: {
+  workspaceId: string;
+  queries: string[];
+}): Promise<CachedLinkedInResult<LinkedInProfilesResult>> {
+  const queries = Array.from(
+    new Set(args.queries.map(normalizeLinkedInTarget).filter(Boolean))
+  ).slice(0, MAX_PROFILES);
+  if (queries.length === 0) {
+    return { ok: false, error: "Enter at least one LinkedIn profile URL." };
+  }
+
+  const inputHash = hashInput({ queries, type: "PROFILES" });
+  const cached = await readCached<LinkedInProfilesResult>({
+    workspaceId: args.workspaceId,
+    type: "PROFILE",
+    inputHash,
+    ttlMs: DEFAULT_TTL_MS,
+  });
+  if (cached) {
+    return { ok: true, data: cached.result, cachedAt: cached.cachedAt, fromCache: true };
+  }
+
+  try {
+    const handle = await startProfilesRun(queries);
+    return {
+      ok: true,
+      pending: true,
+      runId: handle.runId,
+      datasetId: handle.datasetId,
+      message: PENDING_MSG,
+    };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
 // --------------------------------------------------------------------------
 // Unified poll
 // --------------------------------------------------------------------------
@@ -256,7 +320,7 @@ export async function pollLinkedInTool(
   workspaceId: string,
   input: LinkedInPollInput
 ): Promise<LinkedInPollResult> {
-  const kind = input.type === "PROFILE" ? "profile" : "posts";
+  const kind = input.type === "COMPANY_POSTS" ? "posts" : "profile";
 
   let status: { status: string; statusMessage?: string; datasetId?: string };
   try {
@@ -283,11 +347,16 @@ export async function pollLinkedInTool(
   }
 
   if (input.type === "COMPANY_POSTS") {
-    const data = normalizeCompanyPosts(items, input.targets);
+    const data = normalizeCompanyPosts(items, input.targets, {
+      scrapedReactions: input.scrapeReactions,
+      scrapedComments: input.scrapeComments,
+    });
     const ih = hashInput({
       targets: input.targets,
       maxPosts: input.maxPosts,
       includeReposts: input.includeReposts,
+      scrapeReactions: input.scrapeReactions,
+      scrapeComments: input.scrapeComments,
       type: "COMPANY_POSTS",
     });
     await writeCached({
@@ -298,9 +367,48 @@ export async function pollLinkedInTool(
         targets: input.targets,
         maxPosts: input.maxPosts,
         includeReposts: input.includeReposts,
+        scrapeReactions: input.scrapeReactions,
+        scrapeComments: input.scrapeComments,
       },
       result: data,
     });
+    return { ok: true, status: "DONE", data, cachedAt: new Date() };
+  }
+
+  if (input.type === "PROFILES") {
+    const data = normalizeProfiles(items, input.queries);
+    // Record which requested URLs returned nothing (best-effort match).
+    const found = new Set(
+      data.profiles
+        .map((p) => (p.publicIdentifier ?? "").toLowerCase())
+        .filter(Boolean)
+    );
+    data.notFound = input.queries.filter((q) => {
+      const id = (extractPublicIdentifier(q) ?? "").toLowerCase();
+      return id ? !found.has(id) : false;
+    });
+
+    const ih = hashInput({ queries: input.queries, type: "PROFILES" });
+    await writeCached({
+      workspaceId,
+      type: "PROFILE",
+      inputHash: ih,
+      input: { queries: input.queries },
+      result: data,
+    });
+    // Also cache each profile individually so single lookups / overlapping
+    // batches can reuse them.
+    for (const p of data.profiles) {
+      const target = p.url ?? (p.publicIdentifier ? `https://www.linkedin.com/in/${p.publicIdentifier}` : null);
+      if (!target) continue;
+      await writeCached({
+        workspaceId,
+        type: "PROFILE",
+        inputHash: hashInput({ query: normalizeLinkedInTarget(target), type: "PROFILE" }),
+        input: { query: normalizeLinkedInTarget(target) },
+        result: { query: normalizeLinkedInTarget(target), profile: p } satisfies LinkedInProfileResult,
+      });
+    }
     return { ok: true, status: "DONE", data, cachedAt: new Date() };
   }
 

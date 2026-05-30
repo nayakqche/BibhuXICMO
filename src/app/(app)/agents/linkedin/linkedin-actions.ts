@@ -8,6 +8,7 @@ import { meteredGenerateObject, pickAvailableModel } from "@/backend/llm";
 import {
   runCompanyPosts,
   runProfile,
+  runProfiles,
   pollLinkedInTool,
   type CachedLinkedInResult,
   type LinkedInPollInput,
@@ -16,6 +17,7 @@ import {
 import type {
   LinkedInCompanyPostsResult,
   LinkedInProfileResult,
+  LinkedInProfilesResult,
   LinkedInProfile,
 } from "@/integrations/linkedin-apify";
 
@@ -27,6 +29,9 @@ export async function startCompanyPostsAction(args: {
   targets: string[];
   maxPosts?: number;
   includeReposts?: boolean;
+  scrapeReactions?: boolean;
+  scrapeComments?: boolean;
+  maxComments?: number;
 }): Promise<CachedLinkedInResult<LinkedInCompanyPostsResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runCompanyPosts({ workspaceId: workspace.id, ...args });
@@ -39,6 +44,15 @@ export async function startProfileAction(args: {
 }): Promise<CachedLinkedInResult<LinkedInProfileResult>> {
   const { workspace } = await requireWorkspace();
   const res = await runProfile({ workspaceId: workspace.id, query: args.query });
+  if (res.ok && !("pending" in res)) revalidatePath("/agents/linkedin");
+  return res;
+}
+
+export async function startProfilesAction(args: {
+  queries: string[];
+}): Promise<CachedLinkedInResult<LinkedInProfilesResult>> {
+  const { workspace } = await requireWorkspace();
+  const res = await runProfiles({ workspaceId: workspace.id, queries: args.queries });
   if (res.ok && !("pending" in res)) revalidatePath("/agents/linkedin");
   return res;
 }
