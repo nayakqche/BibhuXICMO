@@ -52,7 +52,7 @@ export function ChatDock({
         {
           role: "assistant",
           content:
-            "I can't think yet — no valid LLM API key is configured. Add **ANTHROPIC_API_KEY** (preferred — the CMO is Claude-first) or OPENAI_API_KEY to your environment, then redeploy or restart the dev server.",
+            "I'm not available right now. Please try again later.",
         },
       ]);
       setBusy(false);
@@ -191,9 +191,7 @@ export function ChatDock({
               ))}
               {!llmConfigured ? (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300">
-                  Add <code className="font-mono">ANTHROPIC_API_KEY</code> (preferred) or
-                  {" "}<code className="font-mono">OPENAI_API_KEY</code> to enable real
-                  responses. The AI CMO routes Claude-first.
+                  The assistant isn&apos;t available yet. Please check back soon.
                 </p>
               ) : null}
             </div>

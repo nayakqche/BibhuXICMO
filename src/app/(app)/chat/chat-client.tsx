@@ -11,31 +11,20 @@ import { cn } from "@/shared/utils";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const MODELS = [
-  { value: "gpt-4o", label: "GPT-4o" },
-  { value: "gpt-4o-mini", label: "GPT-4o mini" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
-] as const;
-
 export function Chat({
   sessions,
   activeSessionId,
-  activeModel,
   initialMessages,
   initialInput = "",
 }: {
-  sessions: Array<{ id: string; title: string; model: string; updatedAt: string }>;
+  sessions: Array<{ id: string; title: string; updatedAt: string }>;
   activeSessionId?: string;
-  activeModel: string;
   initialMessages: Msg[];
   initialInput?: string;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState(initialInput);
-  const [model, setModel] = useState(activeModel);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(activeSessionId);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -107,7 +96,6 @@ export function Chat({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          model,
           messages: next,
         }),
       });
@@ -199,10 +187,8 @@ export function Chat({
                 )}
               >
                 <div className="truncate font-medium">{s.title}</div>
-                <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span>{s.model.replace("gpt-4o-mini", "4o-mini").replace("gpt-4o", "4o")}</span>
-                  <span>·</span>
-                  <span>{format(new Date(s.updatedAt), "MMM d")}</span>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  {format(new Date(s.updatedAt), "MMM d")}
                 </div>
               </Link>
             ))
@@ -212,19 +198,9 @@ export function Chat({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              disabled={streaming}
-            >
-              {MODELS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            Assistant
             {streaming && (
               <Badge variant="outline" className="gap-1 text-xs">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -240,8 +216,8 @@ export function Chat({
               <MessageSquare className="mb-4 h-10 w-10 text-muted-foreground/50" />
               <h2 className="text-xl font-semibold">Start a new conversation</h2>
               <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                Pick a model and ask anything. Your workspace&apos;s brand voice is
-                available as context when you need it.
+                Ask anything about your workspace — audits, analytics, drafts,
+                threads and campaigns. Answers are grounded in your live data.
               </p>
             </div>
           )}
@@ -292,7 +268,7 @@ export function Chat({
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-3xl text-[10px] text-muted-foreground">
-            Shift + Enter for newline · each message uses credits based on the selected model
+            Shift + Enter for newline · answers are based on your workspace data
           </p>
         </form>
       </div>
