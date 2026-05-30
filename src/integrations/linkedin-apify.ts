@@ -159,6 +159,10 @@ export type LinkedInProfile = {
   hiring: boolean;
   topSkills: string | null;
   currentCompany: string | null;
+  /** Best email found via email-search mode (SMTP-validated). May be null. */
+  email: string | null;
+  /** All deliverable emails found via email-search mode. */
+  emails: string[];
   experience: LinkedInExperience[];
   education: LinkedInEducation[];
   skills: string[];
@@ -360,12 +364,29 @@ export function startProfileRun(query: { url?: string; publicIdentifier?: string
   return startRun(env.APIFY_LINKEDIN_PROFILE_ACTOR_ID, input, "profile");
 }
 
+/** Actor profileScraperMode values. Email search costs ~$10/1k vs ~$4/1k. */
+const PROFILE_MODE_NO_EMAIL = "Profile details no email ($4 per 1k)";
+const PROFILE_MODE_EMAIL = "Profile details + email search ($10 per 1k)";
+
 /**
  * Bulk profile scrape: the harvestapi profile actor accepts a `queries` array
  * of profile URLs or public identifiers and returns one item per profile.
+ * Set `findEmail` to run the SMTP-validated email search. LinkedIn does not
+ * expose emails or phone numbers publicly, so emails are found independently
+ * and phone numbers are not available from this actor at all.
  */
-export function startProfilesRun(queries: string[]): Promise<ApifyRunHandle> {
-  return startRun(env.APIFY_LINKEDIN_PROFILE_ACTOR_ID, { queries }, "profile");
+export function startProfilesRun(
+  queries: string[],
+  opts?: { findEmail?: boolean }
+): Promise<ApifyRunHandle> {
+  return startRun(
+    env.APIFY_LINKEDIN_PROFILE_ACTOR_ID,
+    {
+      queries,
+      profileScraperMode: opts?.findEmail ? PROFILE_MODE_EMAIL : PROFILE_MODE_NO_EMAIL,
+    },
+    "profile"
+  );
 }
 
 // --------------------------------------------------------------------------
@@ -538,6 +559,30 @@ export function normalizeCompanyPosts(
  * most builds, or the profile fields at the top level on others).
  * Returns null when the item carries no usable profile data.
  */
+/** Pull emails from the various shapes the email-search mode can return. */
+function parseProfileEmails(el: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v.includes("@")) out.push(v.trim());
+  };
+  push(el.email);
+  push(el.workEmail);
+  push(el.personalEmail);
+  const arr = Array.isArray(el.emails)
+    ? (el.emails as unknown[])
+    : Array.isArray(el.emailSearch)
+      ? (el.emailSearch as unknown[])
+      : [];
+  for (const e of arr) {
+    if (typeof e === "string") push(e);
+    else if (e && typeof e === "object") {
+      const ee = e as Record<string, unknown>;
+      push(ee.email ?? ee.address ?? ee.value);
+    }
+  }
+  return Array.from(new Set(out.map((e) => e.toLowerCase())));
+}
+
 function normalizeProfileElement(raw: unknown): LinkedInProfile | null {
   const first = asRecord(raw);
   const el = asRecord(first.element ?? first);
@@ -599,6 +644,8 @@ function normalizeProfileElement(raw: unknown): LinkedInProfile | null {
     asStr(el.publicIdentifier) ||
     "LinkedIn member";
 
+  const emails = parseProfileEmails(el);
+
   return {
     publicIdentifier: asStr(el.publicIdentifier),
     fullName,
@@ -616,6 +663,8 @@ function normalizeProfileElement(raw: unknown): LinkedInProfile | null {
     hiring: el.hiring === true,
     topSkills: asStr(el.topSkills),
     currentCompany: asStr(currentPos.companyName),
+    email: emails[0] ?? null,
+    emails,
     experience,
     education,
     skills,
