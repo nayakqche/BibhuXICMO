@@ -106,7 +106,13 @@ export function Chat({
       }
 
       const newSid = res.headers.get("X-Chat-Session-Id");
-      if (newSid && !sessionId) setSessionId(newSid);
+      if (newSid && !sessionId) {
+        setSessionId(newSid);
+        // Keep the URL in sync (no reload) so refresh / tab-switch restores this chat.
+        if (typeof window !== "undefined") {
+          window.history.replaceState(null, "", `/chat?session=${newSid}`);
+        }
+      }
 
       const ct = res.headers.get("content-type") ?? "";
       if (ct.includes("application/json")) {
