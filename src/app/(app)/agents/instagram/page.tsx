@@ -6,7 +6,6 @@ import { prisma } from "@/backend/db";
 import { env } from "@/shared/env";
 import { InstagramRunButtons } from "@/frontend/components/app/instagram-run-buttons";
 import { Badge } from "@/frontend/components/ui/badge";
-import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
   CardContent,
@@ -33,7 +32,6 @@ import { IGCookiesModal } from "./ig-cookies-modal";
 import { CampaignControls } from "./campaign-controls";
 import { CampaignForm } from "./campaign-form";
 import { InfluencerFind, type CreatorRow } from "./influencer-find";
-import { NegotiateView, type NegCampaign } from "./negotiate-view";
 
 export const metadata = { title: "Instagram Agent" };
 
@@ -104,17 +102,7 @@ export default async function InstagramAgentPage() {
         orderBy: { createdAt: "desc" },
         include: {
           negotiations: {
-            orderBy: { updatedAt: "desc" },
-            select: {
-              id: true,
-              status: true,
-              autopilot: true,
-              agreedPrice: true,
-              messages: true,
-              creator: {
-                select: { handle: true, followers: true, profilePicture: true },
-              },
-            },
+            select: { id: true, status: true, autopilot: true },
           },
         },
       })
@@ -144,33 +132,6 @@ export default async function InstagramAgentPage() {
     : igAccount?.pageName ?? "Connected";
 
   const hasApifyToken = Boolean(env.APIFY_IG_TOKEN || env.APIFY_TOKEN);
-
-  const negCampaigns: NegCampaign[] = campaigns.map((c) => ({
-    id: c.id,
-    name: c.name,
-    brand: c.brand,
-    budgetMin: c.budgetMin,
-    budgetMax: c.budgetMax,
-    status: c.status,
-    autopilot: c.autopilot,
-    negotiations: c.negotiations.map((n) => {
-      const msgs = (Array.isArray(n.messages) ? n.messages : []) as Array<{
-        role?: string;
-        text?: string;
-      }>;
-      const last = msgs[msgs.length - 1];
-      return {
-        id: n.id,
-        handle: n.creator.handle,
-        followers: n.creator.followers,
-        profilePicture: n.creator.profilePicture,
-        status: n.status,
-        agreedPrice: n.agreedPrice,
-        lastMessage: last?.text ?? null,
-        lastRole: last?.role ?? null,
-      };
-    }),
-  }));
 
   const creatorRows: CreatorRow[] = creators.map((c) => ({
     id: c.id,
@@ -202,23 +163,13 @@ export default async function InstagramAgentPage() {
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
             Find creators in your niche, copy a personalized DM, and (optionally)
             generate daily Post / Reel / Story drafts in your brand voice.{" "}
-            {integration
-              ? `Connected as ${igLabel}.`
-              : "Connect Instagram via Facebook Login to auto-publish."}
+            {integration ? `Connected as ${igLabel}.` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!integration && (
-            <Button asChild variant="default" size="sm">
-              <a href="/api/integrations/instagram/start">Connect Instagram</a>
-            </Button>
-          )}
           <IGCookiesModal hasCookies={cookiesOn} />
         </div>
       </div>
-
-      {/* ====== AI Negotiation Agent (Negotiate) ====== */}
-      <NegotiateView campaigns={negCampaigns} hasCookies={cookiesOn} />
 
       {/* ====== PRIMARY VIEW: QuickAds-style InfluencerFind ====== */}
       <InfluencerFind

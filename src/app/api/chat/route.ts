@@ -4,8 +4,6 @@ import { z } from "zod";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import {
-  CMO_PREFERRED_MODEL,
-  DEFAULT_MODEL,
   getModel,
   pickAvailableModel,
   runWithFallback,
@@ -56,16 +54,14 @@ function buildSystemPrompt(args: {
     args.industry ? `Industry: ${args.industry}.` : null,
     args.icp ? `Target customer: ${args.icp}.` : null,
     "",
-    "Behavior:",
-    "- If the user asks a general strategy question and did not paste a URL or ask you to run a scan/audit/agent, answer in plain prose with concrete steps. Do not call tools for those messages.",
-    "- When the user pastes any URL, call the analyze_url tool first, then write a concrete page-specific analysis.",
-    "- When asked for an SEO audit, call run_seo_agent. When asked about LLM citations / GEO / 'do AIs cite us', call run_geo_agent.",
-    "- For Reddit / HN questions, use find_reddit_threads / find_hn_threads with sensible keywords.",
-    "- For drafting copy, use draft_x_post / draft_linkedin_post / write_article — explain what was created and where to review it.",
-    "- For 'what are people searching for?' use gsc_top_queries.",
-    "- After any tool runs, always write at least a short summary for the user in your own words (never end with only tool calls and no text).",
-    "- Be specific. Cite the actual numbers, headings, or quotes the tools return. Never invent data.",
-    "- Keep replies tight: lead with the answer, then a short bullet list of evidence, then one suggested next action.",
+    "GROUNDING RULES (strict):",
+    `- Answer ONLY using THIS workspace's own data inside ${SITE_NAME}: the audits, SEO/GEO scans, analytics, drafts, discovered threads/creators, campaigns, and the live results your tools return. Always call the relevant tool and base the answer on what it returns.`,
+    "- When the user pastes any URL, call analyze_url first, then write a concrete page-specific analysis from the result.",
+    "- SEO audit → run_seo_agent. LLM citations / GEO / 'do AIs cite us' → run_geo_agent. Reddit/HN → find_reddit_threads / find_hn_threads. Drafting → draft_x_post / draft_linkedin_post / write_article. 'What are people searching for?' → gsc_top_queries.",
+    "- Cite the actual numbers, headings, or quotes the tools return. NEVER invent data and NEVER answer from outside/general knowledge that isn't grounded in this workspace's data or a tool result.",
+    `- If a request cannot be answered from this workspace's data or your tools (e.g. trivia, coding help, world facts, unrelated topics), politely say you can only help with their ${SITE_NAME} marketing data and agents, and suggest the closest useful action (e.g. run an audit, scan threads, draft a post).`,
+    "- After any tool runs, always write at least a short summary in your own words (never end with only tool calls and no text).",
+    "- Keep replies tight: lead with the answer, then a short bullet list of evidence from the data, then one suggested next action.",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -91,18 +87,14 @@ export async function POST(req: NextRequest) {
   }
 
   const { messages, sessionId: incomingId } = parsed.data;
-  const explicitModel = parsed.data.model;
-  const preferredWhenImplicit =
-    parsed.data.source === "cmo" ? CMO_PREFERRED_MODEL : DEFAULT_MODEL;
-  const preferred = explicitModel ?? preferredWhenImplicit;
+  // The AI CMO dock and Private Chat both run on OpenAI GPT, grounded strictly
+  // on this workspace's data. The model is fixed (not user-selectable).
+  const preferred = "gpt-4o-mini" as const;
   const initialPick = pickAvailableModel(preferred);
 
   if (!initialPick) {
     return NextResponse.json(
-      {
-        error:
-          "No LLM is configured. Add ANTHROPIC_API_KEY (preferred for the AI CMO) or OPENAI_API_KEY in your environment, then redeploy.",
-      },
+      { error: "The assistant isn't available right now. Please try again later." },
       { status: 503 }
     );
   }
@@ -227,14 +219,9 @@ export async function POST(req: NextRequest) {
     console.error("POST /api/chat failed:", err);
     const raw = err instanceof Error ? err.message : "Chat request failed.";
     const lower = raw.toLowerCase();
-    let friendly = raw;
+    let friendly = "The assistant is temporarily unavailable. Please try again in a moment.";
     if (lower.includes("credit balance") || lower.includes("low balance") || lower.includes("billing")) {
-      friendly = `${raw}\n\nThe Anthropic / OpenAI account this server uses is out of credits. Top up at console.anthropic.com or platform.openai.com, OR add a second provider key (e.g. OPENAI_API_KEY, GOOGLE_GEMINI_API_KEY, OPENROUTER_API_KEY) so the AI CMO can fall through.`;
-    } else if (lower.includes("all configured llm providers failed")) {
-      friendly = `${raw}\n\nFix: confirm at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GEMINI_API_KEY / OPENROUTER_API_KEY is set AND has billing credits.`;
-    } else if (lower.includes("no llm provider configured")) {
-      friendly =
-        "No LLM provider configured. Add ANTHROPIC_API_KEY (preferred for the AI CMO) or OPENAI_API_KEY in your environment, then redeploy.";
+      friendly = "The assistant is temporarily unavailable (usage limit reached). Please try again later.";
     }
     return NextResponse.json({ error: friendly }, { status: 502 });
   }
