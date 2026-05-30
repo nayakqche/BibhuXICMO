@@ -80,53 +80,58 @@ enum Role {
 }
 
 model Workspace {
-  id           String   @id @default(cuid())
-  name         String
-  slug         String   @unique
-  websiteUrl   String?
-  industry     String?
-  icp          String? // Ideal customer profile (free text)
-  voiceProfile Json? // brand voice, tone, style guide
+  id                String    @id @default(cuid())
+  name              String
+  slug              String    @unique
+  websiteUrl        String?
+  industry          String?
+  icp               String? // Ideal customer profile (free text)
+  voiceProfile      Json? // brand voice, tone, style guide
   /// Cached structured LLM analysis for /agent/cmo (homepage-only; refreshed when stale or URL changes).
-  cmoLlmSnapshot Json?
+  cmoLlmSnapshot    Json?
   /// Cached Ahrefs snapshot (DR, backlinks, traffic, top keywords/countries/pages).
   /// Refreshed when stale (>24h) or when websiteUrl changes. Apify calls are paid, so cache aggressively.
-  ahrefsSnapshot Json?
-  ahrefsSnapshotAt DateTime?
+  ahrefsSnapshot    Json?
+  ahrefsSnapshotAt  DateTime?
   /// Cached homepage-scrape + PageSpeed + GA4 + GSC bundle for /agent/cmo.
   /// Refreshed every 1h or when websiteUrl changes. Survives serverless cold
   /// starts (unlike unstable_cache which lives in process memory only).
   cmoSlowSnapshot   Json?
   cmoSlowSnapshotAt DateTime?
-  ownerUserId  String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  ownerUserId       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  owner            User                @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
-  members          WorkspaceMember[]
-  subscription     Subscription?
-  creditEntries    CreditLedger[]
-  integrations     Integration[]
-  audits           SiteAudit[]
-  keywords         Keyword[]
-  geoQueries       GeoQuery[]
-  geoScores        GeoScoreSnapshot[]
-  redditThreads    RedditThread[]
-  hnThreads        HNThread[]
-  xThreads         XThread[]
-  igThreads        IGThread[]
-  igCreators       IGCreator[]
-  igCampaigns      IGCampaign[]
-  ytCreators       YTCreator[]
-  seoToolRuns      SeoToolRun[]
-  linkedinScans    LinkedInScan[]
-  aiCitations      AiCitationSnapshot[]
-  igNegotiations   IGNegotiation[]
-  contentDrafts    ContentDraft[]
-  actionItems      ActionItem[]
-  agentRuns        AgentRun[]
-  chatSessions     ChatSession[]
-  scheduledPosts   ScheduledPost[]
+  owner           User                 @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  members         WorkspaceMember[]
+  subscription    Subscription?
+  creditEntries   CreditLedger[]
+  integrations    Integration[]
+  audits          SiteAudit[]
+  keywords        Keyword[]
+  geoQueries      GeoQuery[]
+  geoScores       GeoScoreSnapshot[]
+  redditThreads   RedditThread[]
+  hnThreads       HNThread[]
+  xThreads        XThread[]
+  igThreads       IGThread[]
+  igCreators      IGCreator[]
+  igCampaigns     IGCampaign[]
+  ytCreators      YTCreator[]
+  seoToolRuns     SeoToolRun[]
+  linkedinScans   LinkedInScan[]
+  aiCitations     AiCitationSnapshot[]
+  igNegotiations  IGNegotiation[]
+  emailAccounts   EmailAccount[]
+  emailCampaigns  EmailCampaign[]
+  emailOutreach   EmailOutreach[]
+  processedEmails ProcessedEmail[]
+  mailingContacts MailingContact[]
+  contentDrafts   ContentDraft[]
+  actionItems     ActionItem[]
+  agentRuns       AgentRun[]
+  chatSessions    ChatSession[]
+  scheduledPosts  ScheduledPost[]
 }
 
 model WorkspaceMember {
@@ -252,7 +257,7 @@ model Keyword {
   difficulty   Int?
   trackedSince DateTime @default(now())
 
-  workspace Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   rankings  RankingSnapshot[]
 
   @@unique([workspaceId, query, country])
@@ -277,26 +282,32 @@ model RankingSnapshot {
 // --------------------------------------------------------------------------
 enum SeoTool {
   KEYWORD_DIFFICULTY // KD 0-100 for a single keyword
-  KEYWORD_METRICS    // volume, KD, CPC, traffic potential
-  KEYWORD_RANK       // domain + keyword -> current rank position
-  SERP_OVERVIEW      // top-10 SERP analysis for a keyword
-  TOP_WEBSITES       // ahrefstop.com top sites (global / by category)
-  AI_VISIBILITY      // GEO: how often the domain is cited by ChatGPT, Claude, Perplexity
-  AI_CITATION_CHECK  // GEO: does provider X cite domain for query Y
-  AI_OVERVIEW        // GEO: Google AI Overview content + sources for a query
-  AI_METRICS         // GEO: AI search volume + AIO presence for a keyword
-  TOP_AI_CITED       // GEO: most-cited domains in AI responses
+  KEYWORD_METRICS // volume, KD, CPC, traffic potential
+  KEYWORD_RANK // domain + keyword -> current rank position
+  SERP_OVERVIEW // top-10 SERP analysis for a keyword
+  TOP_WEBSITES // ahrefstop.com top sites (global / by category)
+  AI_VISIBILITY // GEO: how often the domain is cited by ChatGPT, Claude, Perplexity
+  AI_CITATION_CHECK // GEO: does provider X cite domain for query Y
+  AI_OVERVIEW // GEO: Google AI Overview content + sources for a query
+  AI_METRICS // GEO: AI search volume + AIO presence for a keyword
+  TOP_AI_CITED // GEO: most-cited domains in AI responses
 }
 
 model SeoToolRun {
   id          String   @id @default(cuid())
   workspaceId String
   tool        SeoTool
-  /** SHA-256 of the normalized tool input — keyword, domain+keyword, country, etc. */
+  /**
+   * SHA-256 of the normalized tool input — keyword, domain+keyword, country, etc.
+   */
   inputHash   String
-  /** Original input parameters (for display + re-run). */
+  /**
+   * Original input parameters (for display + re-run).
+   */
   input       Json
-  /** Apify (or LLM) response, normalized into the tool-specific shape. */
+  /**
+   * Apify (or LLM) response, normalized into the tool-specific shape.
+   */
   result      Json
   createdAt   DateTime @default(now())
 
@@ -314,18 +325,24 @@ model SeoToolRun {
 // --------------------------------------------------------------------------
 enum LinkedInScanType {
   COMPANY_POSTS // posts + engagement for one or more company/profile URLs
-  PROFILE       // full enriched profile for a single profile URL
+  PROFILE // full enriched profile for a single profile URL
 }
 
 model LinkedInScan {
   id          String           @id @default(cuid())
   workspaceId String
   type        LinkedInScanType
-  /** SHA-256 of the normalized input (targets+maxPosts, or profile query). */
+  /**
+   * SHA-256 of the normalized input (targets+maxPosts, or profile query).
+   */
   inputHash   String
-  /** Original input parameters (for display + re-run). */
+  /**
+   * Original input parameters (for display + re-run).
+   */
   input       Json
-  /** Normalized Apify response (posts list or profile object). */
+  /**
+   * Normalized Apify response (posts list or profile object).
+   */
   result      Json
   createdAt   DateTime         @default(now())
 
@@ -349,16 +366,18 @@ model AiCitationSnapshot {
   /**
    * Per-platform counts:
    * {
-   *   aiOverviews?: { citations, pages },
-   *   chatgpt?:     { citations, pages },
-   *   gemini?:      { citations, pages },
-   *   perplexity?:  { citations, pages },
-   *   copilot?:     { citations, pages },
-   *   grok?:        { citations, pages },
+   * aiOverviews?: { citations, pages },
+   * chatgpt?:     { citations, pages },
+   * gemini?:      { citations, pages },
+   * perplexity?:  { citations, pages },
+   * copilot?:     { citations, pages },
+   * grok?:        { citations, pages },
    * }
    */
   data        Json
-  /** Raw dataset items returned by the Apify actor (for debugging). */
+  /**
+   * Raw dataset items returned by the Apify actor (for debugging).
+   */
   raw         Json?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -480,28 +499,28 @@ model IGThread {
 }
 
 model IGCreator {
-  id              String    @id @default(cuid())
-  workspaceId     String
-  handle          String
-  fullName        String?
-  bio             String?   @db.Text
-  followers       Int       @default(0)
-  following       Int?
-  postsCount      Int?
-  engagementRate  Float?
-  qualityScore    Int? // 0-100 heuristic (engagement, ratio, activity)
-  email           String? // extracted from bio
-  category        String? // IG business category, e.g. "Photographer"
-  niche           String?
-  isVerified      Boolean   @default(false)
-  isBusiness      Boolean   @default(false)
-  profileUrl      String
-  profilePicture  String?
-  externalUrl     String?
-  fit             Float     @default(0) // 0–1 brand fit (LLM-scored)
-  notes           String?   @db.Text
-  lastDmAt        DateTime?
-  discoveredAt    DateTime  @default(now())
+  id             String    @id @default(cuid())
+  workspaceId    String
+  handle         String
+  fullName       String?
+  bio            String?   @db.Text
+  followers      Int       @default(0)
+  following      Int?
+  postsCount     Int?
+  engagementRate Float?
+  qualityScore   Int? // 0-100 heuristic (engagement, ratio, activity)
+  email          String? // extracted from bio
+  category       String? // IG business category, e.g. "Photographer"
+  niche          String?
+  isVerified     Boolean   @default(false)
+  isBusiness     Boolean   @default(false)
+  profileUrl     String
+  profilePicture String?
+  externalUrl    String?
+  fit            Float     @default(0) // 0–1 brand fit (LLM-scored)
+  notes          String?   @db.Text
+  lastDmAt       DateTime?
+  discoveredAt   DateTime  @default(now())
 
   workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   negotiations IGNegotiation[]
@@ -514,36 +533,46 @@ model IGCreator {
 // YouTube creators (QuickAds-style YT search engine)
 // --------------------------------------------------------------------------
 model YTCreator {
-  id              String    @id @default(cuid())
-  workspaceId     String
-  /** YouTube channel ID (UC...). Stable across renames. */
-  channelId       String
-  /** Public channel handle (@username) when present. */
-  handle          String?
-  title           String
-  description     String?   @db.Text
-  subscribers     Int       @default(0)
-  videoCount      Int?
-  viewCount       BigInt?
-  country         String? // ISO 2-letter
-  language        String? // BCP-47 (e.g. "en", "hi-IN")
-  category        String?
-  email           String? // extracted from description
-  thumbnailUrl    String?
-  bannerUrl       String?
-  channelUrl      String
-  customUrl       String?
-  isVerified      Boolean   @default(false)
-  /** Heuristic: true when the channel looks like a real creator, not a corporate / official brand channel. */
-  isCreator       Boolean   @default(true)
-  /** 0-100 — same band-mapping idea as IG: based on subs, video activity, recency. */
-  qualityScore    Int?
-  /** Free-text reason emitted by the smart-creator heuristic (e.g. "Verified brand"). */
-  detectionNote   String?
-  fit             Float     @default(0)
-  notes           String?   @db.Text
-  lastContactAt   DateTime?
-  discoveredAt    DateTime  @default(now())
+  id            String    @id @default(cuid())
+  workspaceId   String
+  /**
+   * YouTube channel ID (UC...). Stable across renames.
+   */
+  channelId     String
+  /**
+   * Public channel handle (@username) when present.
+   */
+  handle        String?
+  title         String
+  description   String?   @db.Text
+  subscribers   Int       @default(0)
+  videoCount    Int?
+  viewCount     BigInt?
+  country       String? // ISO 2-letter
+  language      String? // BCP-47 (e.g. "en", "hi-IN")
+  category      String?
+  email         String? // extracted from description
+  thumbnailUrl  String?
+  bannerUrl     String?
+  channelUrl    String
+  customUrl     String?
+  isVerified    Boolean   @default(false)
+  /**
+   * Heuristic: true when the channel looks like a real creator, not a corporate / official brand channel.
+   */
+  isCreator     Boolean   @default(true)
+  /**
+   * 0-100 — same band-mapping idea as IG: based on subs, video activity, recency.
+   */
+  qualityScore  Int?
+  /**
+   * Free-text reason emitted by the smart-creator heuristic (e.g. "Verified brand").
+   */
+  detectionNote String?
+  fit           Float     @default(0)
+  notes         String?   @db.Text
+  lastContactAt DateTime?
+  discoveredAt  DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -647,7 +676,7 @@ model ContentDraft {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   scheduledPosts ScheduledPost[]
 
   @@index([workspaceId, status])
@@ -766,4 +795,149 @@ model ChatMessage {
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
+}
+
+// ===========================================================================
+//  YouTube email outreach + AI auto-negotiation (SMTP send + IMAP inbox).
+//  Mirrors the QuickAds creator-outreach engine: connect Gmail/SendGrid/SMTP,
+//  send AI outreach, then the auto-negotiator checks the inbox every 5 min and
+//  negotiates within budget (max 2 follow-ups, polite, locks the deal).
+// ===========================================================================
+
+model EmailAccount {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  email        String
+  smtpHost     String
+  smtpPort     Int      @default(587)
+  smtpUser     String
+  /**
+   * App password / SMTP secret, encrypted at rest (reuses IG cookie crypto).
+   */
+  smtpPassword String   @db.Text
+  displayName  String?
+  dailyLimit   Int      @default(100)
+  sentToday    Int      @default(0)
+  sentResetAt  DateTime @default(now())
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+}
+
+model EmailCampaign {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  name         String
+  brief        String?  @db.Text
+  topic        String?
+  budgetMin    Int      @default(0)
+  budgetMax    Int      @default(0)
+  /**
+   * Negotiation ceiling — AI never offers above this.
+   */
+  maxOffer     Int      @default(0)
+  requirements String?  @db.Text
+  deadline     String?
+  /**
+   * active | paused | closed | draft
+   */
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outreach  EmailOutreach[]
+
+  @@index([workspaceId, status])
+}
+
+model EmailOutreach {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  campaignId        String
+  emailAccountId    String?
+  recipientName     String?
+  recipientEmail    String
+  subject           String
+  body              String    @db.Text
+  /**
+   * draft | sent | replied
+   */
+  status            String    @default("draft")
+  /**
+   * initial | negotiating | final_offer | deal_closed | rejected | rejected_over_budget | declined
+   */
+  negotiationStage  String    @default("initial")
+  currentOffer      Int       @default(0)
+  negotiationRounds Int       @default(0)
+  followupCount     Int       @default(0)
+  aiResponse        String?   @db.Text
+  replyContent      String?   @db.Text
+  lastInboundAt     DateTime?
+  lastOutboundAt    DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  EmailCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  thread    EmailThreadMessage[]
+
+  @@index([workspaceId, status])
+  @@index([campaignId])
+  @@index([recipientEmail])
+}
+
+model EmailThreadMessage {
+  id         String   @id @default(cuid())
+  outreachId String
+  /**
+   * inbound | outbound
+   */
+  direction  String
+  subject    String?
+  body       String   @db.Text
+  createdAt  DateTime @default(now())
+
+  outreach EmailOutreach @relation(fields: [outreachId], references: [id], onDelete: Cascade)
+
+  @@index([outreachId])
+}
+
+model ProcessedEmail {
+  id          String   @id @default(cuid())
+  workspaceId String
+  messageId   String
+  fromEmail   String?
+  subject     String?
+  bodyHash    String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, messageId])
+  @@index([workspaceId])
+}
+
+model MailingContact {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String?
+  email       String
+  notes       String?
+  /**
+   * pending | sent | replied
+   */
+  status      String   @default("pending")
+  campaignId  String?
+  outreachId  String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }

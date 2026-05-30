@@ -17,6 +17,7 @@ import { getAgent, listAgents } from "@/backend/agents/registry";
 import { publishDraft } from "@/backend/publish";
 import { prisma } from "@/backend/db";
 import { sendEmail, renderDigestEmail } from "@/backend/email";
+import { runAutoNegotiator } from "@/backend/youtube/email-negotiator";
 import { env } from "@/shared/env";
 import { SITE_NAME } from "@/shared/site";
 
@@ -146,6 +147,32 @@ cron.schedule("*/10 * * * *", async () => {
     // IGNegotiation table may not exist yet pre-migration.
     const code = (err as { code?: string })?.code;
     if (code !== "P2021") console.warn("[cron] ig negotiation enqueue:", err);
+  }
+});
+
+// YouTube email auto-negotiator — every 5 minutes. Checks each workspace's
+// inboxes for creator replies and negotiates within budget (max 2 follow-ups).
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    const workspaces = await prisma.workspace.findMany({
+      where: { emailAccounts: { some: { isActive: true } } },
+      select: { id: true },
+    });
+    for (const ws of workspaces) {
+      try {
+        const res = await runAutoNegotiator(ws.id);
+        if (res.repliesProcessed || res.followupsSent) {
+          console.log(
+            `[cron] email-negotiator ${ws.id}: ${res.repliesProcessed} replies, ${res.followupsSent} follow-ups`
+          );
+        }
+      } catch (err) {
+        console.warn(`[cron] email-negotiator ${ws.id}:`, err);
+      }
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code !== "P2021") console.warn("[cron] email-negotiator enqueue:", err);
   }
 });
 
