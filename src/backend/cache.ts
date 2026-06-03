@@ -1,46 +1,13 @@
 /**
  * Lightweight Redis-backed cache for external API results.
  *
- * Goal: cut paid API calls (Apify, Ahrefs, YouTube, LLM, …) by serving a
- * recent result from Redis when one exists. Falls back to a per-process
- * in-memory map when Redis isn't reachable, so it's always safe to call —
- * a missing/broken Redis just degrades to "no shared cache", never an error.
- *
- * Layering: this sits in FRONT of the durable Postgres caches (SeoToolRun,
- * LinkedInScan, …). Read order is Redis → Postgres → live API; writes
- * populate both. Redis is the fast hot layer; Postgres is the source of truth
- * that survives Redis eviction / restarts.
+ * Read order for cached tools: Redis → Postgres (Supabase) → live API.
+ * Falls back to per-process memory when Redis is unavailable.
  */
-import IORedis from "ioredis";
+import { getRedis } from "@/backend/redis";
 
 type MemEntry = { value: string; expiresAt: number };
 const mem = new Map<string, MemEntry>();
-
-let _redis: IORedis | null | undefined;
-
-function getRedis(): IORedis | null {
-  if (_redis !== undefined) return _redis;
-  const url = process.env.REDIS_URL?.trim();
-  if (!url) {
-    _redis = null;
-    return null;
-  }
-  try {
-    _redis = new IORedis(url, {
-      maxRetriesPerRequest: 2,
-      enableReadyCheck: false,
-      lazyConnect: false,
-    });
-    _redis.on("error", (err) => {
-      if ("code" in err && (err as { code?: string }).code === "ECONNREFUSED") return;
-      console.warn("[cache] Redis:", err.message);
-    });
-    return _redis;
-  } catch {
-    _redis = null;
-    return null;
-  }
-}
 
 const PREFIX = "cache:";
 
@@ -56,14 +23,12 @@ function memGet(key: string): string | null {
 
 function memSet(key: string, value: string, ttlSeconds: number): void {
   mem.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
-  // Bound the in-memory map so it can't grow unbounded in a long-lived process.
   if (mem.size > 1000) {
     const oldest = mem.keys().next().value;
     if (oldest) mem.delete(oldest);
   }
 }
 
-/** Read a cached JSON value. Returns null on miss / parse error. */
 export async function cacheGet<T>(key: string): Promise<T | null> {
   const k = PREFIX + key;
   const redis = getRedis();
@@ -72,14 +37,13 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
       const raw = await redis.get(k);
       if (raw != null) return JSON.parse(raw) as T;
     } catch {
-      /* fall through to memory */
+      /* fall through */
     }
   }
   const raw = memGet(k);
   return raw != null ? (JSON.parse(raw) as T) : null;
 }
 
-/** Write a JSON value with a TTL (seconds). Best-effort; never throws. */
 export async function cacheSet(
   key: string,
   value: unknown,
@@ -103,7 +67,6 @@ export async function cacheSet(
   }
 }
 
-/** Drop a cached key (e.g. when the underlying input changes). */
 export async function cacheDel(key: string): Promise<void> {
   const k = PREFIX + key;
   mem.delete(k);
@@ -117,10 +80,6 @@ export async function cacheDel(key: string): Promise<void> {
   }
 }
 
-/**
- * Read-through helper: return the cached value for `key`, or run `fn`, cache
- * its result for `ttlSeconds`, and return it. Errors from `fn` are NOT cached.
- */
 export async function remember<T>(
   key: string,
   ttlSeconds: number,

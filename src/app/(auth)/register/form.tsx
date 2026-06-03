@@ -122,13 +122,17 @@ export function RegisterForm() {
       ) : (
         <p className="text-center text-xs text-muted-foreground">
           By creating an account you agree to our{" "}
-          <a href="/terms" className="underline">
+          <Link href="/terms" className="underline">
             Terms
-          </a>{" "}
-          and{" "}
-          <a href="/privacy" className="underline">
+          </Link>
+          ,{" "}
+          <Link href="/privacy" className="underline">
             Privacy Policy
-          </a>
+          </Link>
+          , and{" "}
+          <Link href="/cookies" className="underline">
+            Cookie Policy
+          </Link>
           .
         </p>
       )}

@@ -24,6 +24,7 @@ import type {
   SerpOverviewResult,
   TopWebsitesResult,
 } from "@/backend/ahrefs-tools";
+import { brandFromDomain } from "@/shared/domain";
 
 // --------------------------------------------------------------------------
 // 1) AI Visibility — Apify (async, may return pending)
@@ -32,17 +33,6 @@ import type {
 // `keyword` or a legacy `domain` arg — when only `domain` is passed we
 // extract the root subdomain as the brand name (github.com → github).
 // --------------------------------------------------------------------------
-function brandFromDomain(input: string): string {
-  const s = input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .split("/")[0];
-  if (!s) return "";
-  const root = s.split(".")[0];
-  return root.charAt(0).toUpperCase() + root.slice(1);
-}
 
 export async function runAiVisibilityAction(args: {
   /** Preferred: brand or keyword to track. */

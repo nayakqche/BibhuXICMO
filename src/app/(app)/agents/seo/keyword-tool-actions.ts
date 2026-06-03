@@ -22,6 +22,7 @@ import type {
   TopWebsitesResult,
   AiVisibilityResult,
 } from "@/backend/ahrefs-tools";
+import { brandFromDomain } from "@/shared/domain";
 
 // --------------------------------------------------------------------------
 // Start actions — return cached data OR a pending handle to poll.
@@ -76,18 +77,6 @@ export async function runTopWebsitesAction(args: {
   const res = await runTopWebsites({ workspaceId: workspace.id, ...args });
   if ("ok" in res && res.ok && !("pending" in res)) revalidatePath("/agents/seo");
   return res;
-}
-
-function brandFromDomain(input: string): string {
-  const s = input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .split("/")[0];
-  if (!s) return "";
-  const root = s.split(".")[0];
-  return root.charAt(0).toUpperCase() + root.slice(1);
 }
 
 export async function runAiVisibilityAction(args: {

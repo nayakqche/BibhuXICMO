@@ -16,9 +16,12 @@ const COMPANY = [
 ];
 
 const LEGAL = [
-  { href: "/privacy", label: "Privacy Policy" },
-  { href: "/terms", label: "Terms of Service" },
-  { href: "/refund", label: "Refund Policy" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+  { href: "/cookies", label: "Cookies" },
+  { href: "/acceptable-use", label: "Acceptable use" },
+  { href: "/subprocessors", label: "Subprocessors" },
+  { href: "/refund", label: "Refunds" },
 ];
 
 export function SiteFooter() {

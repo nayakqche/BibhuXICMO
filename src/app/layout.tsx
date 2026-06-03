@@ -6,6 +6,7 @@ import { auth } from "@/backend/auth";
 import { AuthProvider } from "@/app/auth-provider";
 import { ThemeProvider } from "@/app/theme-provider";
 import { RouteProgress } from "@/frontend/components/ui/route-progress";
+import { CookieConsent } from "@/frontend/components/marketing/cookie-consent";
 import { env } from "@/shared/env";
 import { PRODUCT_LINE, SITE_NAME } from "@/shared/site";
 import "./globals.css";
@@ -80,6 +81,7 @@ export default async function RootLayout({
             <RouteProgress />
           </Suspense>
           <AuthProvider session={session}>{children}</AuthProvider>
+          <CookieConsent />
           <Toaster position="top-right" richColors closeButton />
         </ThemeProvider>
       </body>

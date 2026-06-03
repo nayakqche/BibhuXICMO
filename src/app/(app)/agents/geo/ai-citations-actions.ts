@@ -9,6 +9,7 @@ import {
   hashInput,
 } from "@/backend/seo-tools-cache";
 import type { AiVisibilityResult } from "@/backend/ahrefs-tools";
+import { brandFromDomain, normalizeDomain } from "@/shared/domain";
 import type {
   AiCitationsActionResult,
   AiCitationsBundle,
@@ -22,22 +23,6 @@ import type {
 // Perplexity, Copilot, GoogleAIOverviews, GoogleAIMode) plus monthly trends
 // in one call. Result is cached for 24h via SeoToolRun. No LLM probes.
 // ---------------------------------------------------------------------------
-
-function normalizeDomain(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .split("/")[0];
-}
-
-function brandFromDomain(domain: string): string {
-  const s = normalizeDomain(domain);
-  if (!s) return "";
-  const root = s.split(".")[0];
-  return root.charAt(0).toUpperCase() + root.slice(1);
-}
 
 function avResultToBundle(
   result: AiVisibilityResult,

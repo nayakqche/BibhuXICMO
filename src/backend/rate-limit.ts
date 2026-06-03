@@ -1,10 +1,9 @@
 /**
  * Rate limiting for API routes.
- * - When `process.env.REDIS_URL` is set (e.g. Upstash on Vercel), uses a fixed-window counter in Redis.
- * - Otherwise uses an in-memory token bucket (fine for single-instance dev; weak on multi-instance without Redis).
+ * Uses the shared Redis connection when REDIS_URL is set; otherwise in-memory.
  */
 
-import IORedis from "ioredis";
+import { getRedis } from "@/backend/redis";
 
 type Bucket = { tokens: number; last: number };
 const buckets = new Map<string, Bucket>();
@@ -13,30 +12,6 @@ export type RateLimitResult =
   | { ok: true; remaining: number }
   | { ok: false; retryAfterMs: number };
 
-let _redis: IORedis | undefined | null;
-
-function getOptionalRedis(): IORedis | null {
-  const url = process.env.REDIS_URL?.trim();
-  if (!url) return null;
-  if (_redis === null) return null;
-  if (_redis) return _redis;
-  try {
-    _redis = new IORedis(url, {
-      maxRetriesPerRequest: 2,
-      enableReadyCheck: true,
-    });
-    _redis.on("error", (err) => {
-      if ("code" in err && err.code === "ECONNREFUSED") return;
-      console.warn("[rate-limit] Redis:", err.message);
-    });
-    return _redis;
-  } catch {
-    _redis = null;
-    return null;
-  }
-}
-
-/** Synchronous in-memory limiter (tests + fallback). */
 export function rateLimit(
   key: string,
   { limit, windowMs }: { limit: number; windowMs: number }
@@ -58,10 +33,12 @@ export function rateLimit(
 }
 
 async function rateLimitRedis(
-  redis: IORedis,
   key: string,
   { limit, windowMs }: { limit: number; windowMs: number }
 ): Promise<RateLimitResult> {
+  const redis = getRedis();
+  if (!redis) return rateLimit(key, { limit, windowMs });
+
   const redisKey = `rl:api:${key}`;
   const n = await redis.incr(redisKey);
   if (n === 1) {
@@ -77,20 +54,16 @@ async function rateLimitRedis(
   return { ok: true, remaining: Math.max(0, limit - n) };
 }
 
-/**
- * Prefer this in route handlers. Uses Redis when `REDIS_URL` is set in the environment;
- * otherwise falls back to in-memory `rateLimit`.
- */
 export async function rateLimitAsync(
   key: string,
   opts: { limit: number; windowMs: number }
 ): Promise<RateLimitResult> {
-  const redis = getOptionalRedis();
+  const redis = getRedis();
   if (!redis) {
     return rateLimit(key, opts);
   }
   try {
-    return await rateLimitRedis(redis, key, opts);
+    return await rateLimitRedis(key, opts);
   } catch (e) {
     console.warn("[rate-limit] Redis error, using memory:", e);
     return rateLimit(key, opts);

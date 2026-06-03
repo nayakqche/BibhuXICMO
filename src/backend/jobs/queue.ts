@@ -1,21 +1,7 @@
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
-import { env } from "@/shared/env";
+import { getRedisConnection } from "@/backend/redis";
 
-let _connection: IORedis | null = null;
-
-export function getRedisConnection() {
-  if (_connection) return _connection;
-  _connection = new IORedis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-  });
-  _connection.on("error", (err) => {
-    if ("code" in err && err.code === "ECONNREFUSED") return;
-    console.warn("Redis error:", err.message);
-  });
-  return _connection;
-}
+export { getRedisConnection };
 
 export type AgentJob = {
   agentId: string;

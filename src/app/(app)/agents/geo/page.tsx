@@ -22,24 +22,9 @@ import {
   type PlatformKey,
   type PlatformCounts,
 } from "./ai-citations-types";
+import { brandFromDomain, normalizeDomain } from "@/shared/domain";
 
 export const metadata = { title: "GEO Agent" };
-
-function normalizeDomain(input: string | null | undefined): string {
-  if (!input) return "";
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .split("/")[0];
-}
-
-function brandFromDomain(domain: string): string {
-  if (!domain) return "";
-  const root = domain.split(".")[0];
-  return root.charAt(0).toUpperCase() + root.slice(1);
-}
 
 function isPlatformKey(s: string): s is PlatformKey {
   return (
