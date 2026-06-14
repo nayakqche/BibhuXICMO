@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { auth } from "./auth";
+import { auth, signOut } from "./auth";
 import { prisma } from "./db";
 import { seedFreeCredits } from "./credits";
 import { slugify } from "@/shared/utils";
@@ -13,6 +13,19 @@ export type WorkspaceWithSubscription = Prisma.WorkspaceGetPayload<{
 type MembershipWithWorkspace = Prisma.WorkspaceMemberGetPayload<{
   include: { workspace: { include: { subscription: true } }; user: true };
 }>;
+
+/**
+ * JWT sessions can outlive the database row — common after switching DATABASE_URL
+ * to a fresh Supabase project while the browser still holds the old cookie.
+ */
+async function requireDbUser(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    await signOut({ redirect: false });
+    redirect("/login");
+  }
+  return user;
+}
 
 /**
  * OAuth sign-in only creates a User row (via the Auth adapter). Email/password
@@ -34,8 +47,7 @@ export async function ensureUserWorkspace(
   });
   if (existing) return existing;
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new Error(`User ${userId} not found`);
+  const user = await requireDbUser(userId);
 
   const label =
     displayName?.trim() ||
@@ -100,6 +112,8 @@ export async function requireWorkspace(
 }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+
+  await requireDbUser(session.user.id);
 
   let membership = await loadMembership(session.user.id);
   if (!membership) {
