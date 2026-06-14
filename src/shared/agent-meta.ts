@@ -49,15 +49,25 @@ export const AGENT_META: Record<string, AgentMeta> = {
     id: "hn",
     label: "Hacker News",
     creditsApprox: 4,
-    description: "Surface relevant HN threads and Show HN opportunities.",
+    description:
+      "Daily Show HN & Ask HN drafts, thread discovery, and comment suggestions — no HN API key.",
     href: "/agents/hn",
   },
   x: {
     id: "x",
     label: "X / Twitter",
     creditsApprox: 5,
-    description: "Daily post drafts, reply suggestions, thread builders.",
+    description:
+      "Daily tweet & thread drafts, Apify-powered reply scan, schedule + auto-publish via X OAuth.",
     href: "/agents/x",
+  },
+  instagram: {
+    id: "instagram",
+    label: "Instagram",
+    creditsApprox: 6,
+    description:
+      "Daily Post/Reel/Story drafts, comment replies via Graph API, hashtag discovery, and opt-in creator outreach with AI negotiation.",
+    href: "/agents/instagram",
   },
   linkedin: {
     id: "linkedin",

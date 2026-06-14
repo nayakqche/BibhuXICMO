@@ -2,10 +2,12 @@ import { format } from "date-fns";
 import { AlertTriangle, CheckCircle2, Search } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
+import { hasSeoApifyToken } from "@/backend/ahrefs-tools";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { RunAgentButton } from "@/frontend/components/app/run-agent-button";
 import { AhrefsPanel } from "@/frontend/components/app/ahrefs-panel";
+import { KeywordTools } from "./keyword-tools";
 
 export const metadata = { title: "SEO Agent" };
 
@@ -88,6 +90,11 @@ export default async function SeoAgentPage() {
       </div>
 
       <AhrefsPanel hasWebsite={!!workspace.websiteUrl} />
+
+      <KeywordTools
+        defaultDomain={(workspace.websiteUrl ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]}
+        hasApifyToken={hasSeoApifyToken()}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

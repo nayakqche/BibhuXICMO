@@ -17,6 +17,7 @@ import { getAgent, listAgents } from "@/backend/agents/registry";
 import { publishDraft } from "@/backend/publish";
 import { prisma } from "@/backend/db";
 import { sendEmail, renderDigestEmail } from "@/backend/email";
+import { runAutoNegotiator } from "@/backend/youtube/email-negotiator";
 import { env } from "@/shared/env";
 import { SITE_NAME } from "@/shared/site";
 
@@ -82,7 +83,15 @@ for (const agent of listAgents()) {
         select: { id: true },
       });
       for (const ws of workspaces) {
-        await enqueueAgentRun(agent.id, ws.id);
+        const input =
+          agent.id === "hn"
+            ? { mode: "scan" }
+            : agent.id === "x"
+              ? { mode: "both" }
+              : agent.id === "instagram"
+                ? { mode: "both" }
+                : undefined;
+        await enqueueAgentRun(agent.id, ws.id, input);
       }
     });
     console.log(`[cron] registered ${agent.id} @ ${agent.schedule}`);
@@ -90,6 +99,177 @@ for (const agent of listAgents()) {
     console.warn(`[cron] invalid schedule for ${agent.id}: ${agent.schedule}`, err);
   }
 }
+
+// Hacker News — daily Show HN / Ask HN generation at 14:00 UTC (~morning US)
+cron.schedule("0 14 * * *", async () => {
+  console.log("[cron] fan-out agent:hn posts");
+  const workspaces = await prisma.workspace.findMany({
+    where: { websiteUrl: { not: null } },
+    select: { id: true },
+  });
+  for (const ws of workspaces) {
+    await enqueueAgentRun("hn", ws.id, { mode: "posts" });
+  }
+});
+
+// Instagram comment scan — hourly, looks at the user's own recent posts.
+cron.schedule("0 * * * *", async () => {
+  const workspaces = await prisma.workspace.findMany({
+    where: {
+      integrations: { some: { provider: "INSTAGRAM" } },
+    },
+    select: { id: true },
+  });
+  for (const ws of workspaces) {
+    await enqueueAgentRun("instagram", ws.id, { mode: "comments" });
+  }
+});
+
+// Instagram negotiation autopilot — every 10 minutes.
+cron.schedule("*/10 * * * *", async () => {
+  try {
+    const workspaces = await prisma.workspace.findMany({
+      where: {
+        integrations: { some: { provider: "INSTAGRAM" } },
+        igNegotiations: {
+          some: {
+            autopilot: true,
+            status: { in: ["DM_SENT", "REPLIED", "NEGOTIATING"] },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    for (const ws of workspaces) {
+      await enqueueAgentRun("instagram", ws.id, { mode: "negotiate" });
+    }
+  } catch (err) {
+    // IGNegotiation table may not exist yet pre-migration.
+    const code = (err as { code?: string })?.code;
+    if (code !== "P2021") console.warn("[cron] ig negotiation enqueue:", err);
+  }
+});
+
+// YouTube email auto-negotiator — every 5 minutes. Checks each workspace's
+// inboxes for creator replies and negotiates within budget (max 2 follow-ups).
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    const workspaces = await prisma.workspace.findMany({
+      where: { emailAccounts: { some: { isActive: true } } },
+      select: { id: true },
+    });
+    for (const ws of workspaces) {
+      try {
+        const res = await runAutoNegotiator(ws.id);
+        if (res.repliesProcessed || res.followupsSent) {
+          console.log(
+            `[cron] email-negotiator ${ws.id}: ${res.repliesProcessed} replies, ${res.followupsSent} follow-ups`
+          );
+        }
+      } catch (err) {
+        console.warn(`[cron] email-negotiator ${ws.id}:`, err);
+      }
+    }
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code !== "P2021") console.warn("[cron] email-negotiator enqueue:", err);
+  }
+});
+
+// X / Instagram auto-publish — every 5 minutes, publish any due scheduled drafts.
+cron.schedule("*/5 * * * *", async () => {
+  const due = await prisma.scheduledPost.findMany({
+    where: {
+      status: "pending",
+      channel: { in: ["X", "INSTAGRAM"] },
+      scheduledAt: { lte: new Date() },
+    },
+    include: { draft: true, workspace: { include: { owner: true } } },
+    take: 50,
+  });
+  for (const sp of due) {
+    if (!sp.draft) continue;
+    try {
+      const res = await publishDraft(sp.workspaceId, sp.draftId);
+      if (res.ok) {
+        await prisma.scheduledPost.update({
+          where: { id: sp.id },
+          data: { status: "posted", processedAt: new Date() },
+        });
+        if (sp.workspace.owner.email) {
+          const channelLabel = sp.channel === "INSTAGRAM" ? "Instagram" : "X";
+          await emailQueue().add(`auto-published:${sp.id}`, {
+            to: sp.workspace.owner.email,
+            subject: `${SITE_NAME} · Published your scheduled ${channelLabel} post`,
+            html: `<p>Your ${channelLabel} draft <strong>${sp.draft.title ?? "Untitled"}</strong> is live.</p>${res.url ? `<p><a href="${res.url}">View</a></p>` : ""}`,
+          });
+        }
+      } else {
+        await prisma.scheduledPost.update({
+          where: { id: sp.id },
+          data: {
+            status: "failed",
+            processedAt: new Date(),
+            error: res.error.slice(0, 1000),
+          },
+        });
+      }
+    } catch (err) {
+      await prisma.scheduledPost.update({
+        where: { id: sp.id },
+        data: {
+          status: "failed",
+          processedAt: new Date(),
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 1000),
+        },
+      });
+    }
+  }
+});
+
+// HN scheduled post reminders — every 15 minutes
+cron.schedule("*/15 * * * *", async () => {
+  const due = await prisma.scheduledPost.findMany({
+    where: {
+      status: "pending",
+      channel: "HACKER_NEWS",
+      scheduledAt: { lte: new Date() },
+    },
+    include: {
+      draft: true,
+      workspace: { include: { owner: true } },
+    },
+    take: 50,
+  });
+  for (const sp of due) {
+    if (!sp.draft) continue;
+    const meta = sp.draft.meta as Record<string, unknown> | null;
+    const hnKind = meta?.hnKind ?? "show_hn";
+    await prisma.actionItem.create({
+      data: {
+        workspaceId: sp.workspaceId,
+        agent: "hn",
+        type: "hn.post",
+        title: `Time to post your ${hnKind === "ask_hn" ? "Ask HN" : "Show HN"}`,
+        summary: sp.draft.title ?? "Your scheduled HN draft is ready to submit.",
+        cta: "Submit on HN",
+        href: `/content/${sp.draftId}`,
+        priority: "HIGH",
+      },
+    });
+    if (sp.workspace.owner.email) {
+      await emailQueue().add(`hn-reminder:${sp.id}`, {
+        to: sp.workspace.owner.email,
+        subject: `${SITE_NAME} · Time to post on Hacker News`,
+        html: `<p>Your scheduled HN draft <strong>${sp.draft.title ?? "Untitled"}</strong> is ready.</p><p><a href="${env.APP_URL}/content/${sp.draftId}">Review and submit on HN</a></p>`,
+      });
+    }
+    await prisma.scheduledPost.update({
+      where: { id: sp.id },
+      data: { status: "reminded", processedAt: new Date() },
+    });
+  }
+});
 
 // Daily email digest — 7:00 UTC
 cron.schedule("0 7 * * *", async () => {

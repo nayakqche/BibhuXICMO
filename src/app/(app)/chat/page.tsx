@@ -14,18 +14,16 @@ export default async function ChatPage(props: {
     where: { userId: user.id },
     orderBy: { updatedAt: "desc" },
     take: 40,
-    select: { id: true, title: true, model: true, updatedAt: true },
+    select: { id: true, title: true, updatedAt: true },
   });
 
   let initialMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
-  let activeModel = "gpt-4o-mini";
   if (sessionId) {
     const s = await prisma.chatSession.findFirst({
       where: { id: sessionId, userId: user.id },
       include: { messages: { orderBy: { createdAt: "asc" } } },
     });
     if (s) {
-      activeModel = normalizeLegacyModel(s.model);
       initialMessages = s.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({
@@ -40,24 +38,11 @@ export default async function ChatPage(props: {
       sessions={sessions.map((s) => ({
         id: s.id,
         title: s.title ?? "Untitled",
-        model: normalizeLegacyModel(s.model),
         updatedAt: s.updatedAt.toISOString(),
       }))}
       activeSessionId={sessionId}
-      activeModel={activeModel}
       initialMessages={initialMessages}
       initialInput={prompt ?? ""}
     />
   );
-}
-
-/**
- * Anthropic retired the old `claude-3-5-*` model IDs in late 2025. Old chat
- * sessions still have those names persisted; map them to the current Claude
- * 4.x lineup so the model dropdown highlights the right entry.
- */
-function normalizeLegacyModel(model: string): string {
-  if (model === "claude-3-5-sonnet") return "claude-sonnet-4-6";
-  if (model === "claude-3-5-haiku") return "claude-haiku-4-5";
-  return model;
 }

@@ -5,9 +5,13 @@ const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   APP_URL: z.string().url().default("http://localhost:3000"),
 
+  // Supabase: use the transaction pooler URL (port 6543, ?pgbouncer=true) here.
   DATABASE_URL: z
     .string()
     .default("postgresql://xicmo:xicmo@localhost:5432/xicmo?schema=public"),
+  // Supabase: direct/session connection (port 5432) for `prisma db push`.
+  // Falls back to DATABASE_URL locally where a single Postgres serves both.
+  DIRECT_URL: z.string().optional(),
   REDIS_URL: z.string().default("redis://localhost:6379"),
 
   AUTH_SECRET: z.string().min(1).default("dev-secret-change-me"),
@@ -40,6 +44,10 @@ const envSchema = z.object({
   LINKEDIN_CLIENT_ID: z.string().optional(),
   LINKEDIN_CLIENT_SECRET: z.string().optional(),
 
+  /** Facebook OAuth — needed for Instagram Business / Creator account connect. */
+  FACEBOOK_CLIENT_ID: z.string().optional(),
+  FACEBOOK_CLIENT_SECRET: z.string().optional(),
+
   GSC_CLIENT_ID: z.string().optional(),
   GSC_CLIENT_SECRET: z.string().optional(),
   PAGESPEED_API_KEY: z.string().optional(),
@@ -56,13 +64,125 @@ const envSchema = z.object({
   /** Apify token used for the Ahrefs scraper actor + any other Apify integrations. */
   APIFY_TOKEN: z.string().optional(),
   /**
+   * Optional dedicated Apify token for the X (Twitter) scraper. If set, the
+   * X agent uses this token instead of APIFY_TOKEN — useful when you want
+   * Ahrefs and X to bill against separate Apify accounts / credit pools.
+   * Falls back to APIFY_TOKEN when unset.
+   */
+  APIFY_X_TOKEN: z.string().optional(),
+  /**
+   * Optional dedicated Apify token for the SEO + GEO keyword tools
+   * (Keyword Difficulty, Metrics, Rank, SERP Overview, Top Websites, AI
+   * Visibility, AI Overview, Top AI-cited). If set, those tools bill
+   * against this account instead of APIFY_TOKEN. Falls back to APIFY_TOKEN
+   * when unset.
+   */
+  APIFY_SEO_TOKEN: z.string().optional(),
+  /**
    * Apify actor id that returns Ahrefs-style site data (domain rating,
    * backlinks, organic traffic, top keywords). Defaults to the
    * `radeance/ahrefs-scraper` actor; override to swap providers.
    */
   APIFY_AHREFS_ACTOR_ID: z.string().default("radeance~ahrefs-scraper"),
+  /**
+   * Apify actor id for Google SERP scraping (used by the GEO AI Overviews
+   * probe). The default `apify/google-search-scraper` is the most widely
+   * deployed one — override only if you use a private/custom variant.
+   */
+  APIFY_GOOGLE_SERP_ACTOR_ID: z.string().default("apify~google-search-scraper"),
+  /**
+   * Apify actor id for Twitter / X tweet search. Returns recent tweets
+   * matching a keyword query. Default actor: `apidojo/tweet-scraper`
+   * (~$0.40 per 1k tweets, no X API Basic required).
+   */
+  APIFY_X_ACTOR_ID: z.string().default("apidojo~tweet-scraper"),
+
+  /**
+   * Optional dedicated Apify token for the Instagram scraper. If set,
+   * the Instagram agent uses this token instead of APIFY_TOKEN — useful
+   * when you want IG and X/Ahrefs scraping to bill against separate
+   * Apify accounts. Falls back to APIFY_TOKEN when unset.
+   */
+  APIFY_IG_TOKEN: z.string().optional(),
+  /** Apify actor id for general Instagram profile/post scraping. */
+  APIFY_IG_ACTOR_ID: z.string().default("apify~instagram-scraper"),
+  /** Apify actor id for hashtag-keyed Instagram post discovery. */
+  APIFY_IG_HASHTAG_ACTOR_ID: z.string().default("apify~instagram-hashtag-scraper"),
+  /** Apify actor id for Instagram DM automation (uses session cookies). */
+  APIFY_IG_DM_ACTOR_ID: z.string().default("quickads~instagram-dm-automation"),
+  /**
+   * Apify actor id for the QuickAds-style network-expansion influencer
+   * discovery. This actor takes 1–5 seed handles and returns up to 500
+   * similar profiles with email, engagement rate, and a Quality label —
+   * the InfluencerFind tab on /agents/instagram uses this exclusively.
+   * Default: `afanasenko~instagram-profile-scraper` (Mode 3 networkExpansion).
+   * Billed at $0.01 per analyzed profile on Apify.
+   */
+  APIFY_IG_NETWORK_ACTOR_ID: z
+    .string()
+    .default("afanasenko~instagram-profile-scraper"),
+
+  /**
+   * Optional shared Apify token for the LinkedIn agent. Used as a fallback
+   * for both LinkedIn actors when a per-actor token below isn't set.
+   * Falls back further to APIFY_TOKEN.
+   */
+  APIFY_LINKEDIN_TOKEN: z.string().optional(),
+  /**
+   * Apify token for the LinkedIn PROFILE scraper actor. Set this with the
+   * Apify API key you want to bill profile lookups against.
+   * Resolution order: APIFY_LINKEDIN_PROFILE_TOKEN → APIFY_LINKEDIN_TOKEN → APIFY_TOKEN.
+   */
+  APIFY_LINKEDIN_PROFILE_TOKEN: z.string().optional(),
+  /**
+   * Apify token for the LinkedIn COMPANY POSTS scraper actor. Set this with
+   * the Apify API key you want to bill post scrapes against.
+   * Resolution order: APIFY_LINKEDIN_POSTS_TOKEN → APIFY_LINKEDIN_TOKEN → APIFY_TOKEN.
+   */
+  APIFY_LINKEDIN_POSTS_TOKEN: z.string().optional(),
+  /**
+   * Apify actor id for the LinkedIn profile scraper. Returns a full profile
+   * (experience, education, skills, headline, about) for one profile URL /
+   * publicIdentifier per run. Default: `harvestapi/linkedin-profile-scraper`
+   * (~$4 per 1k profiles, no cookies required).
+   */
+  APIFY_LINKEDIN_PROFILE_ACTOR_ID: z
+    .string()
+    .default("harvestapi~linkedin-profile-scraper"),
+  /**
+   * Apify actor id for the LinkedIn company/profile posts scraper. Returns
+   * recent posts with engagement (likes/comments/shares) for one or more
+   * company/profile URLs in a single run. Default:
+   * `harvestapi/linkedin-company-posts` (~$2 per 1k posts; reactions and
+   * comments bill as separate items, so we leave them off by default).
+   */
+  APIFY_LINKEDIN_COMPANY_POSTS_ACTOR_ID: z
+    .string()
+    .default("harvestapi~linkedin-company-posts"),
+
+  /**
+   * Google YouTube Data API v3 key. Powers /agents/youtube creator
+   * search — same source the QuickAds reference uses. Get one at
+   * https://console.cloud.google.com/apis/credentials after enabling
+   * the "YouTube Data API v3" service. Free tier is 10 000 units/day
+   * (≈99 keyword searches with full channel-detail enrichment).
+   */
+  YOUTUBE_API_KEY: z.string().optional(),
 
   SENTRY_DSN: z.string().optional(),
+
+  /** Dev-only override: set to "1" to unlock every plan-gated feature and
+   *  bypass credit checks. Use during development; never set in production. */
+  XICMO_UNLOCK_ALL: z.string().optional(),
+
+  /** Client-side mirror of XICMO_UNLOCK_ALL. Required for paywall overlays
+   *  that live in client components and can't read server env vars. */
+  NEXT_PUBLIC_XICMO_UNLOCK_ALL: z.string().optional(),
+
+  /** Public URL of the Python Reddit Sales Agent FastAPI service
+   *  (e.g. https://reddit-agent.onrender.com). Read client-side by the
+   *  Reddit page to issue analyze / threads / posts requests. */
+  NEXT_PUBLIC_REDDIT_AGENT_URL: z.string().url().optional(),
 });
 
 /** Vercel sets VERCEL_URL (no scheme); derive public URLs when app env is unset. */

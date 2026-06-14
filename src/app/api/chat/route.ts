@@ -4,13 +4,13 @@ import { z } from "zod";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import {
-  CMO_PREFERRED_MODEL,
-  DEFAULT_MODEL,
   getModel,
   pickAvailableModel,
   runWithFallback,
 } from "@/backend/llm";
-import { chargeCredits, MODEL_CREDIT_COST } from "@/backend/credits";
+import { getBalance, chargeCredits, MODEL_CREDIT_COST } from "@/backend/credits";
+import { getEffectivePlan } from "@/backend/plan";
+import { loadCmoFastData, type CmoFastData } from "@/backend/agents/cmo-data";
 import { rateLimitAsync, ipKey } from "@/backend/rate-limit";
 import { buildCmoTools } from "@/backend/agents/cmo-tools";
 import { SITE_NAME } from "@/shared/site";
@@ -44,11 +44,77 @@ const bodySchema = z.object({
   ),
 });
 
+const GEN_TIMEOUT_MS = 50_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("chat_timeout")), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
+/** Compact, DB-only snapshot of the workspace's live data for grounding. */
+function snapshotText(fast: CmoFastData): string {
+  const lines: string[] = [];
+  lines.push(`SEO score: ${fast.scores.seo ?? "n/a"} · GEO score: ${fast.scores.geo ?? "n/a"}.`);
+  const a = fast.workspace.ahrefsSnapshot as Record<string, unknown> | null;
+  if (a && typeof a === "object") {
+    const get = (...keys: string[]) => {
+      for (const k of keys) {
+        const v = a[k];
+        if (typeof v === "number" || (typeof v === "string" && v.trim())) return v;
+      }
+      return null;
+    };
+    const dr = get("domainRating", "dr", "domain_rating");
+    const backlinks = get("backlinks", "totalBacklinks", "backlinksCount");
+    const refDomains = get("referringDomains", "refdomains", "refDomains", "referring_domains");
+    const rank = get("ahrefsRank", "ahrefs_rank");
+    const dofollowBl = get("dofollowBacklinks", "dofollow_backlinks");
+    const dofollowRd = get("dofollowReferringDomains", "dofollowRefdomains", "dofollow_refdomains");
+    const traffic = get("traffic", "organicTraffic", "orgTraffic");
+    const parts: string[] = [];
+    if (dr != null) parts.push(`Domain Rating ${dr}/100`);
+    if (backlinks != null) parts.push(`${backlinks} total backlinks`);
+    if (refDomains != null) parts.push(`${refDomains} referring domains`);
+    if (dofollowBl != null) parts.push(`${dofollowBl} dofollow backlinks`);
+    if (dofollowRd != null) parts.push(`${dofollowRd} dofollow referring domains`);
+    if (rank != null) parts.push(`Ahrefs Rank #${rank}`);
+    if (traffic != null) parts.push(`~${traffic} est. monthly organic traffic`);
+    if (parts.length) lines.push(`Backlink / authority profile (Ahrefs): ${parts.join(", ")}.`);
+    else lines.push("Backlink profile: no Ahrefs snapshot captured yet — open the AI CMO once to populate it, or run the SEO Agent.");
+  } else {
+    lines.push("Backlink profile: no Ahrefs snapshot captured yet — open the AI CMO once to populate it, or run the SEO Agent.");
+  }
+  if (fast.topKeywords.length) {
+    lines.push(`Top keywords: ${fast.topKeywords.slice(0, 8).map((k) => k.query).join(", ")}.`);
+  }
+  if (fast.topCompetitors.length) {
+    lines.push(`Competitors: ${fast.topCompetitors.slice(0, 6).join(", ")}.`);
+  }
+  if (fast.topIssues.length) {
+    lines.push(`Top SEO issues: ${fast.topIssues.slice(0, 5).map((i) => i.title).join("; ")}.`);
+  }
+  if (fast.openActions.length) {
+    lines.push(`Open action items: ${fast.openActions.slice(0, 5).map((x) => x.title).join("; ")}.`);
+  }
+  if (fast.recentRuns.length) {
+    lines.push(`Recent agent runs: ${fast.recentRuns.slice(0, 5).map((r) => `${r.agent} (${r.status.toLowerCase()})`).join(", ")}.`);
+  }
+  const connected = Object.entries(fast.integrations).filter(([, v]) => v).map(([k]) => k);
+  lines.push(`Connected integrations: ${connected.length ? connected.join(", ") : "none"}.`);
+  return lines.join("\n");
+}
+
 function buildSystemPrompt(args: {
   workspaceName: string;
   websiteUrl: string | null;
   industry: string | null;
   icp: string | null;
+  dataSnapshot: string;
 }): string {
   const lines = [
     `You are the AI CMO inside ${SITE_NAME}, the marketing co-pilot for ${args.workspaceName}.`,
@@ -56,15 +122,16 @@ function buildSystemPrompt(args: {
     args.industry ? `Industry: ${args.industry}.` : null,
     args.icp ? `Target customer: ${args.icp}.` : null,
     "",
-    "Behavior:",
-    "- If the user asks a general strategy question and did not paste a URL or ask you to run a scan/audit/agent, answer in plain prose with concrete steps. Do not call tools for those messages.",
-    "- When the user pastes any URL, call the analyze_url tool first, then write a concrete page-specific analysis.",
-    "- When asked for an SEO audit, call run_seo_agent. When asked about LLM citations / GEO / 'do AIs cite us', call run_geo_agent.",
-    "- For Reddit / HN questions, use find_reddit_threads / find_hn_threads with sensible keywords.",
-    "- For drafting copy, use draft_x_post / draft_linkedin_post / write_article — explain what was created and where to review it.",
-    "- For 'what are people searching for?' use gsc_top_queries.",
-    "- After any tool runs, always write at least a short summary for the user in your own words (never end with only tool calls and no text).",
-    "- Be specific. Cite the actual numbers, headings, or quotes the tools return. Never invent data.",
+    "WORKSPACE DATA SNAPSHOT (the user's live data — your PRIMARY source, answer from this):",
+    args.dataSnapshot || "(no data yet — the user hasn't run any audits or scans).",
+    "",
+    "GROUNDING RULES (strict):",
+    `- Answer ONLY about this workspace's marketing, using the snapshot above and your tools. Cite the actual numbers from the data. NEVER invent data and NEVER answer from outside/general knowledge.`,
+    "- For questions about EXISTING data (SEO/GEO scores, backlinks, keywords, competitors, issues, actions, recent runs), answer immediately from the snapshot. Do NOT call any tool for these — reply right away.",
+    "- Call a tool ONLY when the user explicitly asks to RUN something or pastes a URL: analyze_url (a pasted URL), run_seo_agent (run an SEO audit), run_geo_agent (GEO / 'do AIs cite us'), find_reddit_threads / find_hn_threads, draft_x_post / draft_linkedin_post / write_article, gsc_top_queries.",
+    "- If the snapshot lacks the data they ask about (e.g. no backlink snapshot yet), say so plainly and suggest the action that would populate it — do not stall on a slow tool.",
+    `- If a request is unrelated to this workspace's marketing (trivia, coding, world facts), politely say you only help with their ${SITE_NAME} marketing data and agents, and suggest a relevant action.`,
+    "- After any tool runs, always write a short summary in your own words (never end with only tool calls and no text).",
     "- Keep replies tight: lead with the answer, then a short bullet list of evidence, then one suggested next action.",
   ];
   return lines.filter(Boolean).join("\n");
@@ -91,18 +158,14 @@ export async function POST(req: NextRequest) {
   }
 
   const { messages, sessionId: incomingId } = parsed.data;
-  const explicitModel = parsed.data.model;
-  const preferredWhenImplicit =
-    parsed.data.source === "cmo" ? CMO_PREFERRED_MODEL : DEFAULT_MODEL;
-  const preferred = explicitModel ?? preferredWhenImplicit;
+  // The AI CMO dock and Private Chat both run on OpenAI GPT, grounded strictly
+  // on this workspace's data. The model is fixed (not user-selectable).
+  const preferred = "gpt-4o-mini" as const;
   const initialPick = pickAvailableModel(preferred);
 
   if (!initialPick) {
     return NextResponse.json(
-      {
-        error:
-          "No LLM is configured. Add ANTHROPIC_API_KEY (preferred for the AI CMO) or OPENAI_API_KEY in your environment, then redeploy.",
-      },
+      { error: "The assistant isn't available right now. Please try again later." },
       { status: 503 }
     );
   }
@@ -142,25 +205,52 @@ export async function POST(req: NextRequest) {
   }));
 
   const tools = buildCmoTools(workspace.id);
+
+  // Fast, DB-only workspace snapshot so the assistant answers grounded
+  // questions instantly without waiting on slow scraper tools.
+  let dataSnapshot = "";
+  try {
+    const credits = await getBalance(workspace.id).catch(() => null);
+    const fast = await loadCmoFastData({
+      workspaceId: workspace.id,
+      websiteUrl: workspace.websiteUrl,
+      workspaceName: workspace.name,
+      industry: workspace.industry,
+      icp: workspace.icp,
+      voiceProfile: workspace.voiceProfile,
+      ahrefsSnapshot: workspace.ahrefsSnapshot,
+      ahrefsSnapshotAt: workspace.ahrefsSnapshotAt,
+      plan: getEffectivePlan(workspace.subscription),
+      credits,
+    });
+    dataSnapshot = snapshotText(fast);
+  } catch (err) {
+    console.warn("[chat] snapshot build failed:", err);
+  }
+
   const system = buildSystemPrompt({
     workspaceName: workspace.name,
     websiteUrl: workspace.websiteUrl,
     industry: workspace.industry,
     icp: workspace.icp,
+    dataSnapshot,
   });
 
   try {
-    const { value: result, model: usedModel, tried } = await runWithFallback(
-      preferred,
-      (model) =>
-        generateText({
-          model: getModel(model),
-          system,
-          messages: coreMessages,
-          tools,
-          maxSteps: 5,
-        }),
-      { reason: "chat.generate" }
+    const { value: result, model: usedModel, tried } = await withTimeout(
+      runWithFallback(
+        preferred,
+        (model) =>
+          generateText({
+            model: getModel(model),
+            system,
+            messages: coreMessages,
+            tools,
+            maxSteps: 4,
+          }),
+        { reason: "chat.generate" }
+      ),
+      GEN_TIMEOUT_MS
     );
 
     let text = result.text.trim();
@@ -227,14 +317,11 @@ export async function POST(req: NextRequest) {
     console.error("POST /api/chat failed:", err);
     const raw = err instanceof Error ? err.message : "Chat request failed.";
     const lower = raw.toLowerCase();
-    let friendly = raw;
-    if (lower.includes("credit balance") || lower.includes("low balance") || lower.includes("billing")) {
-      friendly = `${raw}\n\nThe Anthropic / OpenAI account this server uses is out of credits. Top up at console.anthropic.com or platform.openai.com, OR add a second provider key (e.g. OPENAI_API_KEY, GOOGLE_GEMINI_API_KEY, OPENROUTER_API_KEY) so the AI CMO can fall through.`;
-    } else if (lower.includes("all configured llm providers failed")) {
-      friendly = `${raw}\n\nFix: confirm at least one of ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GEMINI_API_KEY / OPENROUTER_API_KEY is set AND has billing credits.`;
-    } else if (lower.includes("no llm provider configured")) {
-      friendly =
-        "No LLM provider configured. Add ANTHROPIC_API_KEY (preferred for the AI CMO) or OPENAI_API_KEY in your environment, then redeploy.";
+    let friendly = "The assistant is temporarily unavailable. Please try again in a moment.";
+    if (lower.includes("chat_timeout")) {
+      friendly = "That request took too long. Try a more specific question, or run the relevant scan/audit first so I can answer from the results.";
+    } else if (lower.includes("credit balance") || lower.includes("low balance") || lower.includes("billing")) {
+      friendly = "The assistant is temporarily unavailable (usage limit reached). Please try again later.";
     }
     return NextResponse.json({ error: friendly }, { status: 502 });
   }

@@ -17,7 +17,9 @@ export type PageSpeedResult = {
 };
 
 const ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
-const TIMEOUT_MS = 18_000;
+// Lighthouse can take 30-50s on a heavy site; mobile emulation is the slow one.
+// 60s is the upper bound; if we still time out, the URL is unscorable.
+const TIMEOUT_MS = 60_000;
 const CATEGORIES = ["performance", "accessibility", "best-practices", "seo"] as const;
 
 type ApiResponse = {
@@ -26,10 +28,13 @@ type ApiResponse = {
   };
 };
 
+type RunResult = { scores: LighthouseScores; error?: string };
+
 async function runOne(
   url: string,
-  strategy: "mobile" | "desktop"
-): Promise<LighthouseScores> {
+  strategy: "mobile" | "desktop",
+  attempt = 1
+): Promise<RunResult> {
   const params = new URLSearchParams({ url, strategy });
   for (const c of CATEGORIES) params.append("category", c);
   if (env.PAGESPEED_API_KEY) params.set("key", env.PAGESPEED_API_KEY);
@@ -42,18 +47,48 @@ async function runOne(
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
-      return emptyScores();
+      let body = "";
+      try {
+        body = (await res.text()).slice(0, 300);
+      } catch {
+        /* ignore */
+      }
+      console.warn(
+        `[pagespeed] ${strategy} ${url} failed: HTTP ${res.status} ${body}`
+      );
+      return {
+        scores: emptyScores(),
+        error: `Google PageSpeed returned ${res.status}${body ? ` — ${body.slice(0, 120)}` : ""}`,
+      };
     }
     const json = (await res.json()) as ApiResponse;
     const cats = json.lighthouseResult?.categories ?? {};
     return {
-      performance: pct(cats.performance?.score),
-      accessibility: pct(cats.accessibility?.score),
-      bestPractices: pct(cats["best-practices"]?.score),
-      seo: pct(cats.seo?.score),
+      scores: {
+        performance: pct(cats.performance?.score),
+        accessibility: pct(cats.accessibility?.score),
+        bestPractices: pct(cats["best-practices"]?.score),
+        seo: pct(cats.seo?.score),
+      },
     };
-  } catch {
-    return emptyScores();
+  } catch (err) {
+    const e = err as Error;
+    const isAbort = e?.name === "AbortError";
+    console.warn(
+      `[pagespeed] ${strategy} ${url} threw on attempt ${attempt}: ${isAbort ? "timeout" : e?.message}`
+    );
+    // Retry once on timeout — Lighthouse cold-start can blow the first call
+    // on free Render hardware. Second attempt usually completes in <30s.
+    if (isAbort && attempt === 1) {
+      clearTimeout(timer);
+      return runOne(url, strategy, 2);
+    }
+    return {
+      scores: emptyScores(),
+      error: isAbort
+        ? `Google PageSpeed timed out after ${Math.round(TIMEOUT_MS / 1000)}s on both attempts — the URL is too slow for Lighthouse. Try a smaller landing page.`
+        : `Google PageSpeed call failed: ${e?.message || "unknown error"}`,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -86,14 +121,18 @@ export async function fetchPageSpeed(url: string): Promise<PageSpeedResult> {
       runOne(url, "desktop"),
     ]);
     const ok =
-      Object.values(mobile).some((v) => v != null) ||
-      Object.values(desktop).some((v) => v != null);
+      Object.values(mobile.scores).some((v) => v != null) ||
+      Object.values(desktop.scores).some((v) => v != null);
+    const errorReason = !ok
+      ? mobile.error || desktop.error || "Google PageSpeed returned no scores."
+      : undefined;
     return {
       ok,
       url,
-      mobile,
-      desktop,
+      mobile: mobile.scores,
+      desktop: desktop.scores,
       fetchedAt: new Date().toISOString(),
+      error: errorReason,
     };
   } catch (err) {
     return {

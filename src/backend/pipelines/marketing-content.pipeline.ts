@@ -94,14 +94,23 @@ export class MarkdownRenderer {
   }
 
   private static inline(s: string) {
-    return s
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-      .replace(
-        /\[([^\]]+)\]\(([^)]+)\)/g,
-        '<a href="$2" class="text-primary hover:underline">$1</a>'
-      );
+    return (
+      s
+        // Images (![alt](url)) — MUST run before the link rule so the
+        // leading "!" isn't consumed by [text](url). Supports data: URIs
+        // (Gemini hero images come back as base64 data: URIs).
+        .replace(
+          /!\[([^\]]*)\]\(([^)\s]+)\)/g,
+          '<img alt="$1" src="$2" class="my-6 w-full rounded-lg border" />'
+        )
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+        .replace(
+          /\[([^\]]+)\]\(([^)]+)\)/g,
+          '<a href="$2" class="text-primary hover:underline">$1</a>'
+        )
+    );
   }
 }
 

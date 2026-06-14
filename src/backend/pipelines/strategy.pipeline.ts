@@ -49,6 +49,9 @@ const SYSTEM_PROMPT = `You are a senior marketing strategist. Given a single web
 
 Hard requirements:
 - competitors: ALWAYS list 3-6 real, well-known direct competitors that target the same ICP. Never leave this empty. If the niche is unclear, use the closest analog category leaders.
+  IMPORTANT FORMAT — each competitor MUST be written as "BrandName (canonical-domain.com)".
+  Examples: "Jasper AI (jasper.ai)", "HubSpot Marketing Hub (hubspot.com)", "Surfer SEO (surferseo.com)", "Notion (notion.so)".
+  Do NOT include http:// or www. — just the bare brand domain in parentheses. This lets the UI render real logos.
 - topicClusters: at least 1 cluster with 3+ keywords.
 - valueProps: 3-5 concrete prop sentences (no fluff).`;
 
@@ -103,33 +106,64 @@ export class StrategyPipeline {
   }
 
   private static buildPrompt(snap: PageSnapshot): string {
-    return [
+    const wordCount = snap.text?.length ?? 0;
+    // If the scraper got blocked (Amazon, Google, LinkedIn, etc. return
+    // minimal content), explicitly tell Claude to lean on its own
+    // knowledge of the brand instead of producing the empty fallback.
+    const scrapeIsBlocked = wordCount < 800;
+    const host = (() => {
+      try {
+        return new URL(snap.url).hostname.replace(/^www\./, "");
+      } catch {
+        return snap.url;
+      }
+    })();
+
+    const lines: string[] = [
       `URL: ${snap.url}`,
-      `Title: ${snap.title}`,
-      `Description: ${snap.description}`,
-      `H1: ${snap.h1.slice(0, 5).join(" | ")}`,
-      `H2: ${snap.h2.slice(0, 10).join(" | ")}`,
-      `Body excerpt:\n${snap.text.slice(0, 6000)}`,
+      `Domain: ${host}`,
+      `Title: ${snap.title || "(not detected)"}`,
+      `Description: ${snap.description || "(not detected)"}`,
+      `H1: ${snap.h1.slice(0, 5).join(" | ") || "(none)"}`,
+      `H2: ${snap.h2.slice(0, 10).join(" | ") || "(none)"}`,
+      `Body excerpt (${wordCount} chars):\n${snap.text.slice(0, 6000) || "(empty)"}`,
       "",
-      "Analyze the page and produce the strategy object.",
-    ].join("\n");
+    ];
+
+    if (scrapeIsBlocked) {
+      lines.push(
+        "IMPORTANT: The scrape returned very little content — the site likely blocks bot user-agents (common for Amazon, Google, LinkedIn, Stripe, etc.).",
+        `Use YOUR OWN KNOWLEDGE of the brand at \"${host}\" to fill in the strategy. ` +
+          "Do NOT return generic placeholders like 'Value proposition 1'. " +
+          "Treat the bare domain as ground truth about which company this is, then write the strategy as if you had read their full site.",
+        ""
+      );
+    }
+
+    lines.push("Analyze the page (or your knowledge of the brand) and produce the strategy object.");
+    return lines.join("\n");
   }
 
   private static fallbackStrategy(snap: PageSnapshot): Strategy {
+    // Only seed value props from real headings; don't fabricate
+    // "Value proposition 1/2/3" placeholders — those leak into the UI
+    // and make the dashboard look broken.
+    const realProps = [snap.h1[0], snap.h1[1], snap.h2[0]]
+      .filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+
     return {
       industry: "Unknown",
-      icp: "Inferred from homepage — update after connecting GSC / GA4.",
-      positioning: snap.description || snap.title || "Add positioning statement.",
+      icp: "Add a brief description of your ideal customer in Settings.",
+      positioning:
+        snap.description ||
+        snap.title ||
+        "Strategy analysis is unavailable until an LLM provider key is configured (ANTHROPIC_API_KEY or OPENAI_API_KEY).",
       voice: {
         tone: "Neutral, professional",
         styleGuidelines: ["Be clear", "Lead with value", "Use active voice"],
         avoid: ["Jargon", "Unfounded claims"],
       },
-      valueProps: [
-        snap.h1[0] || "Value proposition 1",
-        snap.h1[1] || "Value proposition 2",
-        snap.h2[0] || "Value proposition 3",
-      ].filter(Boolean) as string[],
+      valueProps: realProps,
       channels: ["seo", "content", "reddit", "geo"],
       // Intentionally empty — populating with placeholder text leaks instructions
       // into the Company panel as fake "competitors". An empty array makes the
@@ -143,26 +177,49 @@ export class StrategyPipeline {
             : ["product", "features", "pricing"],
         },
       ],
-      firstActions: [
-        {
-          title: "Add a working LLM API key",
-          reason:
-            "Set ANTHROPIC_API_KEY (preferred) or OPENAI_API_KEY with billing credits, then re-run the SEO agent to populate competitors, positioning, and topic clusters.",
-          priority: "high",
-        },
-        {
-          title: "Connect Google Search Console",
-          reason: "Unlock keyword and ranking data for the SEO agent.",
-          priority: "high",
-        },
-        {
-          title: "Add target subreddits",
-          reason: "Let the Reddit agent start monitoring community threads.",
-          priority: "medium",
-        },
-      ],
+      firstActions: buildFallbackFirstActions(),
     };
   }
 }
 
 export const strategyPipeline = new StrategyPipeline();
+
+/**
+ * Onboarding suggestions seeded when the strategy LLM call fails. We
+ * intentionally OMIT the "Add a working LLM API key" item when a provider
+ * key is already configured server-side — otherwise users land on the
+ * dashboard with a permanently misleading nag even though their key is
+ * fine. (Failures in that case are almost always content / network related,
+ * not credential related.)
+ */
+function buildFallbackFirstActions(): Array<{
+  title: string;
+  reason: string;
+  priority: "high" | "medium" | "low";
+}> {
+  const out: Array<{ title: string; reason: string; priority: "high" | "medium" | "low" }> = [];
+  const llmKeyMissing =
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.OPENAI_API_KEY &&
+    !process.env.GOOGLE_GEMINI_API_KEY &&
+    !process.env.OPENROUTER_API_KEY;
+  if (llmKeyMissing) {
+    out.push({
+      title: "Add a working LLM API key",
+      reason:
+        "Set ANTHROPIC_API_KEY (preferred) or OPENAI_API_KEY with billing credits, then re-run the SEO agent.",
+      priority: "high",
+    });
+  }
+  out.push({
+    title: "Connect Google Search Console",
+    reason: "Unlock keyword and ranking data for the SEO agent.",
+    priority: "high",
+  });
+  out.push({
+    title: "Add target subreddits",
+    reason: "Let the Reddit agent start monitoring community threads.",
+    priority: "medium",
+  });
+  return out;
+}

@@ -5,13 +5,11 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Bot,
-  Code2,
   CreditCard,
   FileText,
-  Hash,
   Home,
   Layers,
-  Linkedin,
+  Link2,
   MessageCircle,
   MessageSquare,
   Newspaper,
@@ -21,6 +19,12 @@ import {
   Sparkles,
   TrendingUp,
 } from "lucide-react";
+import {
+  InstagramLogo,
+  LinkedinLogo,
+  XLogo,
+  YoutubeLogo,
+} from "@/frontend/components/brand-logos";
 import { X } from "lucide-react";
 import { cn } from "@/shared/utils";
 import { Logo } from "@/frontend/components/marketing/logo";
@@ -42,11 +46,14 @@ const AGENTS = [
   { href: "/agents/seo", label: "SEO", icon: Search },
   { href: "/agents/geo", label: "GEO", icon: Sparkles },
   { href: "/agents/content", label: "Content Writer", icon: FileText },
-  { href: "/agents/reddit", label: "Reddit", icon: MessageCircle },
+  { href: "/agents/reddit-sales", label: "Reddit Sales", icon: MessageCircle },
   { href: "/agents/hn", label: "Hacker News", icon: Newspaper },
-  { href: "/agents/x", label: "X / Twitter", icon: Hash },
-  { href: "/agents/linkedin", label: "LinkedIn", icon: Linkedin },
-  { href: "/agents/coding", label: "Coding", icon: Code2 },
+  { href: "/agents/x", label: "X / Twitter", icon: XLogo },
+  { href: "/agents/linkedin", label: "LinkedIn", icon: LinkedinLogo },
+  // Influencer + backlink modules — UI stubs for now, backend coming next.
+  { href: "/agents/youtube", label: "YT Creators", icon: YoutubeLogo },
+  { href: "/agents/instagram", label: "Insta Influencers", icon: InstagramLogo },
+  { href: "/agents/backlink-marketplace", label: "Backlink Marketplace", icon: Link2 },
 ];
 
 const DATA = [

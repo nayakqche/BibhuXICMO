@@ -1,13 +1,14 @@
 "use server";
 
 import { z } from "zod";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/backend/db";
 import { requireWorkspace } from "@/backend/workspace";
 import { normalizeUrl } from "@/backend/scraper/fetch";
 import { extractSocialHandles, type SocialHandles } from "@/backend/social-extractor";
-import type { CmoVoiceProfile } from "@/backend/agents/cmo-data";
+import { CMO_SLOW_TAG, type CmoVoiceProfile } from "@/backend/agents/cmo-data";
+import { clearCmoSlowCache } from "@/backend/cmo-slow-cache";
 
 const schema = z.object({
   name: z.string().min(1).max(100),
@@ -52,14 +53,39 @@ export async function updateWorkspaceAction(
         ? {
             voiceProfile: Prisma.DbNull,
             cmoLlmSnapshot: Prisma.DbNull,
+            ahrefsSnapshot: Prisma.DbNull,
+            ahrefsSnapshotAt: null,
           }
         : {}),
     },
   });
 
+  if (urlChanged) {
+    // Drop both layers of the AI-CMO slow-data cache (homepage scrape,
+    // PageSpeed, GSC, GA4) so the panel never lingers on signals from
+    // the previous URL.
+    revalidateTag(CMO_SLOW_TAG);
+    await clearCmoSlowCache(workspace.id);
+
+    const { invalidateStaleHNDrafts } = await import("@/backend/agents/hn-stale");
+    const { invalidateStaleXDrafts } = await import("@/backend/agents/x-stale");
+    const { invalidateStaleIGDrafts } = await import(
+      "@/backend/agents/instagram-stale"
+    );
+    await Promise.all([
+      invalidateStaleHNDrafts(workspace.id, nextUrl),
+      invalidateStaleXDrafts(workspace.id, nextUrl),
+      invalidateStaleIGDrafts(workspace.id, nextUrl),
+    ]);
+  }
+
   revalidatePath("/settings");
   revalidatePath("/dashboard");
   revalidatePath("/agent/cmo");
+  revalidatePath("/agents/hn");
+  revalidatePath("/agents/x");
+  revalidatePath("/content");
+  revalidatePath("/queue");
   return { ok: true as const, resetStrategy: urlChanged };
 }
 
@@ -159,4 +185,38 @@ export async function saveSocialHandlesAction(
   revalidatePath("/settings");
   revalidatePath("/agent/cmo");
   return { ok: true };
+}
+
+/**
+ * Force a fresh audit on the current workspace's URL: clears the cached
+ * voiceProfile, cmoLlmSnapshot, and ahrefsSnapshot so the next dashboard
+ * load re-runs Claude strategy + Apify Ahrefs + PageSpeed from scratch.
+ *
+ * Used by SiteQuickAdd so 'Change site' followed by the same URL still
+ * triggers a full re-audit (otherwise updateWorkspaceAction notices the
+ * URL didn't change and skips the cache reset).
+ */
+export async function forceReauditAction(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  const { workspace } = await requireWorkspace({ skipOnboardingCheck: true });
+  try {
+    await prisma.workspace.update({
+      where: { id: workspace.id },
+      data: {
+        voiceProfile: Prisma.DbNull,
+        cmoLlmSnapshot: Prisma.DbNull,
+        ahrefsSnapshot: Prisma.DbNull,
+        ahrefsSnapshotAt: null,
+      },
+    });
+    revalidatePath("/agent/cmo");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not reset workspace caches.",
+    };
+  }
 }

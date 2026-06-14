@@ -1,3 +1,6 @@
+
+
+
 # Render Blueprint for XIcmo
 # https://render.com/docs/blueprint-spec
 #
@@ -13,12 +16,8 @@
 # web service + database to "starter" once you have traffic — the free web
 # tier spins down after 15 min idle, which adds cold-start latency.
 
-databases:
-  - name: xicmo-db
-    plan: free
-    databaseName: xicmo
-    user: xicmo
-    postgresMajorVersion: 16
+# Postgres is hosted on Supabase (not Render). Set DATABASE_URL + DIRECT_URL
+# in the web service env below using your Supabase connection strings.
 
 services:
   # ------------------------------------------------------------------
@@ -37,19 +36,26 @@ services:
     runtime: node
     plan: free
     region: oregon              # change to "frankfurt" or "singapore" if closer to you
-    buildCommand: npm install && npm run build
-    # `prisma db push` runs once before each deploy boots so the schema
-    # stays in sync. It's idempotent — safe to re-run on every deploy.
-    preDeployCommand: npx prisma db push --skip-generate
-    startCommand: npm start
+    # Render sets NODE_ENV=production which makes `npm install` skip
+    # devDependencies. tailwindcss/postcss/autoprefixer live there and are
+    # needed at build time, so force-include dev deps just for the build.
+    buildCommand: npm install --include=dev && npm run build
+    # `prisma db push` runs in startCommand (instead of preDeployCommand)
+    # so the free tier is happy — pre-deploy hooks are paid-only on Render.
+    # The push is idempotent, so re-running on every cold start is safe.
+    startCommand: bash scripts/render-start.sh
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      # ----- Supabase Postgres -----
+      # DATABASE_URL  = transaction pooler (port 6543, append ?pgbouncer=true&connection_limit=1)
+      # DIRECT_URL    = session pooler / direct (port 5432) — used by `prisma db push`
+      # Get both from Supabase → Project Settings → Database → Connection string.
       - key: DATABASE_URL
-        fromDatabase:
-          name: xicmo-db
-          property: connectionString
+        sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -77,11 +83,81 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
 
-      # ----- Apify (Ahrefs scraper) -----
+      # ----- Apify (Ahrefs scraper + X tweet search) -----
       - key: APIFY_TOKEN
+        sync: false
+      # Optional: dedicated Apify token for the X agent. If unset, the X
+      # agent falls back to APIFY_TOKEN. Useful when you want Ahrefs and
+      # X tweet scraping to bill against separate Apify accounts.
+      - key: APIFY_X_TOKEN
         sync: false
       - key: APIFY_AHREFS_ACTOR_ID
         value: radeance~ahrefs-scraper
+      - key: APIFY_X_ACTOR_ID
+        value: apidojo~tweet-scraper
+      # Apify Google SERP scraper used by the GEO agent's AI Overviews probe.
+      # Override only if you use a custom variant; default is the public actor.
+      - key: APIFY_GOOGLE_SERP_ACTOR_ID
+        value: apify~google-search-scraper
+
+      # ----- X / Twitter OAuth (for posting drafts) -----
+      - key: X_CLIENT_ID
+        sync: false
+      - key: X_CLIENT_SECRET
+        sync: false
+
+      # ----- Facebook Login (for Instagram Business connect) -----
+      # Required for Path A of the Instagram agent (Graph API posting + comments).
+      - key: FACEBOOK_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+
+      # ----- Apify Instagram scrapers (reads + DM automation) -----
+      # Optional dedicated token — falls back to APIFY_TOKEN.
+      - key: APIFY_IG_TOKEN
+        sync: false
+      - key: APIFY_IG_ACTOR_ID
+        value: apify~instagram-scraper
+      - key: APIFY_IG_HASHTAG_ACTOR_ID
+        value: apify~instagram-hashtag-scraper
+      - key: APIFY_IG_DM_ACTOR_ID
+        value: quickads~instagram-dm-automation
+      # Network-expansion scraper used by /agents/instagram InfluencerFind.
+      # Takes 1–5 seed handles and returns similar creators with email,
+      # engagement rate, and a Quality label in one call.
+      - key: APIFY_IG_NETWORK_ACTOR_ID
+        value: afanasenko~instagram-profile-scraper
+
+      # ----- Apify SEO + GEO keyword tools -----
+      # Optional dedicated Apify token for the keyword tools on /agents/seo
+      # and /agents/geo (KD, Metrics, Rank, SERP, Top Sites, AI Visibility,
+      # AI Overview, Top AI-cited). Falls back to APIFY_TOKEN when unset.
+      - key: APIFY_SEO_TOKEN
+        sync: false
+
+      # ----- Apify LinkedIn agent (HarvestAPI scrapers) -----
+      # One Apify API key per actor (paste each separately). Each falls back
+      # to APIFY_LINKEDIN_TOKEN, then APIFY_TOKEN, if left blank.
+      - key: APIFY_LINKEDIN_PROFILE_TOKEN
+        sync: false
+      - key: APIFY_LINKEDIN_POSTS_TOKEN
+        sync: false
+      # Optional shared fallback token for both actors.
+      - key: APIFY_LINKEDIN_TOKEN
+        sync: false
+      # Actor IDs (not secrets) — leave as-is.
+      - key: APIFY_LINKEDIN_PROFILE_ACTOR_ID
+        value: harvestapi~linkedin-profile-scraper
+      - key: APIFY_LINKEDIN_COMPANY_POSTS_ACTOR_ID
+        value: harvestapi~linkedin-company-posts
+
+      # ----- YouTube creator discovery (Google YT Data API v3) -----
+      # Get a key at https://console.cloud.google.com/apis/credentials
+      # after enabling the "YouTube Data API v3" service. 10 000-unit
+      # free tier ≈ 99 keyword searches/day with channel enrichment.
+      - key: YOUTUBE_API_KEY
+        sync: false
 
       # ----- Google PageSpeed (free site-audit Lighthouse scores) -----
       - key: PAGESPEED_API_KEY

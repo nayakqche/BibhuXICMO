@@ -26,6 +26,7 @@ import {
 } from "@/frontend/components/ui/card";
 import { Skeleton } from "@/frontend/components/ui/skeleton";
 import { SITE_NAME } from "@/shared/site";
+import { getEffectivePlan } from "@/backend/plan";
 
 export const metadata = { title: "AI CMO" };
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export const maxDuration = 60;
 export default async function CmoAgentPage() {
   const { workspace } = await requireWorkspace();
   const credits = await getBalance(workspace.id);
-  const plan = workspace.subscription?.plan ?? "FREE";
+  const plan = getEffectivePlan(workspace.subscription);
 
   // Fast path: only DB queries (~50-200ms). Drives the entire shell so the
   // page paints instantly when navigating between tabs.
@@ -46,6 +47,8 @@ export default async function CmoAgentPage() {
     industry: workspace.industry,
     icp: workspace.icp,
     voiceProfile: workspace.voiceProfile,
+    ahrefsSnapshot: workspace.ahrefsSnapshot,
+    ahrefsSnapshotAt: workspace.ahrefsSnapshotAt,
     plan,
     credits,
   });
@@ -65,26 +68,24 @@ export default async function CmoAgentPage() {
 
       <TerminalPanel lines={terminalLines} />
 
+      {/* 4-col layout: Company | Analytics | Actions | Chat (always visible on the right) */}
       <div className="grid gap-5 xl:grid-cols-12">
         <div className="xl:col-span-3">
           <Suspense fallback={<CompanyPanel data={fast} />}>
             <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div className="xl:col-span-5">
+        <div className="xl:col-span-3">
           <Suspense fallback={<AnalyticsSkeleton />}>
             <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div className="xl:col-span-4 flex flex-col gap-5">
+        <div className="xl:col-span-3 flex flex-col gap-5">
           <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
             <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
           </Suspense>
         </div>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-12">
-        <div className="xl:col-span-12">
+        <div className="xl:col-span-3 min-h-[640px]">
           <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
         </div>
       </div>
@@ -173,6 +174,8 @@ function loadSlow(fast: CmoFastData, workspaceId: string) {
       ga4Connected: fast.integrations.ga4,
       gscConnected: fast.integrations.gsc,
       withPageSpeed: true,
+      ahrefsSnapshot: fast.workspace.ahrefsSnapshot,
+      ahrefsSnapshotAt: fast.workspace.ahrefsSnapshotAt,
     });
     slowCache.set(fast, p);
   }
@@ -183,9 +186,16 @@ function AnalyticsSkeleton() {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-2 pb-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          Loading live homepage, integrations, and AI analysis…
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            Loading site signals (typically 30–60s on first run)
+          </div>
+          <p className="text-[11px] text-muted-foreground/80">
+            Scraping homepage · running Google Lighthouse · fetching Ahrefs (DR, traffic, keywords) · running Claude strategy analysis.
+            Persistent cache (1h) — survives redeploys + cold starts. Hit&nbsp;
+            <span className="font-medium text-foreground/80">Refresh</span>&nbsp;in the Analytics panel for fresh data.
+          </p>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">

@@ -11,6 +11,16 @@ import { prisma } from "@/backend/db";
 import { fetchPage, type PageSnapshot } from "@/backend/scraper/fetch";
 import { fetchPageSpeed, type PageSpeedResult } from "@/backend/pagespeed";
 import {
+  readCmoSlowCache,
+  writeCmoSlowCache,
+  type CmoSlowGsc,
+  type CmoSlowGa4,
+} from "@/backend/cmo-slow-cache";
+import {
+  loadAhrefsWithCache,
+  type CachedAhrefsState,
+} from "@/backend/ahrefs-cache";
+import {
   listGSCSites,
   listGA4Properties,
   querySearchAnalytics,
@@ -23,10 +33,19 @@ import {
   type CmoLlmAnalysis,
 } from "@/backend/pipelines/cmo-llm-analysis.pipeline";
 import { strategyPipeline } from "@/backend/pipelines/strategy.pipeline";
+import { extractSocialHandles } from "@/backend/social-extractor";
+import { pickAvailableModel } from "@/backend/llm";
 
 export type { CmoLlmAnalysis };
 
 const CMO_LLM_CACHE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Re-exported tag retained for backward compat — `refreshCmoSlowDataAction`
+ * still calls `revalidateTag(CMO_SLOW_TAG)` to drop any stray Next.js
+ * route cache entries from before we moved to the DB-backed cache.
+ */
+export const CMO_SLOW_TAG = "cmo-slow";
 
 export type CmoVoiceProfile = {
   positioning?: string;
@@ -105,6 +124,8 @@ export type CmoFastData = {
     websiteUrl: string | null;
     industry: string | null;
     icp: string | null;
+    ahrefsSnapshot: unknown;
+    ahrefsSnapshotAt: Date | null;
   };
   plan: "FREE" | "MAX";
   credits: number | null;
@@ -134,6 +155,8 @@ export type CmoSlowData = {
   pageSpeed: PageSpeedResult | null;
   gsc: { connected: boolean; rows: GscRow[]; site: string | null };
   ga4: { connected: boolean; rows: Ga4Row[]; property: string | null };
+  /** Ahrefs snapshot (DR, backlinks, traffic, top keywords/countries/pages) — cached 24h on Workspace. */
+  ahrefs: CachedAhrefsState;
   /** Homepage-only LLM analysis (one provider key). Cached on Workspace.cmoLlmSnapshot. */
   llmAnalysis: CmoLlmAnalysis | null;
   /**
@@ -159,8 +182,30 @@ export async function loadCmoFastData(args: {
   voiceProfile: unknown;
   plan: "FREE" | "MAX";
   credits: number | null;
+  ahrefsSnapshot?: unknown;
+  ahrefsSnapshotAt?: Date | null;
 }): Promise<CmoFastData> {
   const voice = (args.voiceProfile ?? null) as CmoVoiceProfile | null;
+
+  // Auto-resolve stale onboarding actions whose precondition is now satisfied.
+  // Most common case: "Add a working LLM API key" gets seeded during onboarding
+  // when no provider was configured; the action sits forever even after the
+  // user wires Anthropic/OpenAI/etc. Mark it DONE so the actions feed
+  // doesn't keep nagging.
+  if (pickAvailableModel() != null) {
+    try {
+      await prisma.actionItem.updateMany({
+        where: {
+          workspaceId: args.workspaceId,
+          status: "OPEN",
+          title: "Add a working LLM API key",
+        },
+        data: { status: "DONE" },
+      });
+    } catch {
+      // non-fatal — better to render the dashboard than fail it for cleanup.
+    }
+  }
 
   const [
     integrations,
@@ -219,6 +264,8 @@ export async function loadCmoFastData(args: {
       websiteUrl: args.websiteUrl,
       industry: args.industry,
       icp: args.icp,
+      ahrefsSnapshot: args.ahrefsSnapshot ?? null,
+      ahrefsSnapshotAt: args.ahrefsSnapshotAt ?? null,
     },
     plan: args.plan,
     credits: args.credits,
@@ -261,6 +308,8 @@ export async function loadCmoSlowData(args: {
   ga4Connected: boolean;
   gscConnected: boolean;
   withPageSpeed?: boolean;
+  ahrefsSnapshot?: unknown;
+  ahrefsSnapshotAt?: Date | null;
 }): Promise<CmoSlowData> {
   const {
     websiteUrl,
@@ -272,14 +321,64 @@ export async function loadCmoSlowData(args: {
     withPageSpeed = true,
   } = args;
 
-  const [liveSnapshot, pageSpeed, gscData, ga4Data] = await Promise.all([
-    websiteUrl ? fetchPage(websiteUrl).catch(() => null) : Promise.resolve(null),
-    withPageSpeed && websiteUrl
-      ? fetchPageSpeed(websiteUrl).catch(() => null)
-      : Promise.resolve(null),
-    gscConnected ? loadGsc(args.workspaceId) : Promise.resolve(null),
-    ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
-  ]);
+  // ---- DB-backed snapshot lookup ----
+  // The snapshot is the SINGLE source of truth for "this URL has been
+  // fully processed". A fresh snapshot means we already ran homepage
+  // scrape + PageSpeed + GA4 + GSC + the lazy strategy regen + social
+  // handle detection. Hitting it = ~50ms total instead of 30-60s.
+  const cached = await readCmoSlowCache({
+    workspaceId: args.workspaceId,
+    websiteUrl,
+  });
+
+  let liveSnapshot: PageSnapshot | null;
+  let pageSpeed: PageSpeedResult | null;
+  let gscData: CmoSlowGsc | null;
+  let ga4Data: CmoSlowGa4 | null;
+  const ahrefs = await loadAhrefsWithCache({
+    workspaceId: args.workspaceId,
+    websiteUrl,
+    ahrefsSnapshot: args.ahrefsSnapshot,
+    ahrefsSnapshotAt: args.ahrefsSnapshotAt ?? null,
+  });
+
+  if (cached) {
+    console.info(
+      `[cmo-cache] hit · workspace=${args.workspaceId} url=${websiteUrl}`
+    );
+    liveSnapshot = cached.liveSnapshot;
+    pageSpeed = cached.pageSpeed;
+    // Honour current integration state — if the user disconnected GA4/GSC
+    // since the snapshot was taken, don't show stale rows.
+    gscData = gscConnected ? cached.gsc : null;
+    ga4Data = ga4Connected ? cached.ga4 : null;
+  } else {
+    console.info(
+      `[cmo-cache] miss · workspace=${args.workspaceId} url=${websiteUrl} — fetching fresh slow bundle`
+    );
+    [liveSnapshot, pageSpeed, gscData, ga4Data] = await Promise.all([
+      websiteUrl ? fetchPage(websiteUrl).catch(() => null) : Promise.resolve(null),
+      withPageSpeed && websiteUrl
+        ? fetchPageSpeed(websiteUrl).catch(() => null)
+        : Promise.resolve(null),
+      gscConnected ? loadGsc(args.workspaceId) : Promise.resolve(null),
+      ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
+    ]);
+
+    // AWAIT the write — previously fire-and-forget, which could race with
+    // a fast follow-up navigation. ~50ms cost on the cold path (already 30s)
+    // in exchange for guaranteed persistence on every cache miss.
+    if (websiteUrl) {
+      await writeCmoSlowCache({
+        workspaceId: args.workspaceId,
+        websiteUrl,
+        data: { liveSnapshot, pageSpeed, gsc: gscData, ga4: ga4Data },
+      });
+      console.info(
+        `[cmo-cache] persisted · workspace=${args.workspaceId} url=${websiteUrl}`
+      );
+    }
+  }
 
   let llmAnalysis: CmoLlmAnalysis | null = null;
   try {
@@ -298,10 +397,16 @@ export async function loadCmoSlowData(args: {
   // profile yet (e.g. user just changed the site in Settings, which clears
   // voice + cached snapshot). Failures are non-fatal: we just leave voice
   // unset and the user can re-run agents manually.
+  //
+  // CRITICAL: skip when the slow snapshot is fresh. A fresh snapshot proves
+  // we already ran strategy regen for this URL inside the previous render —
+  // if voice still appears empty afterwards, the LLM call either failed or
+  // returned a thin result; re-running won't help and just burns 10-30s of
+  // Claude credits on every page visit.
   let freshVoice: CmoVoiceProfile | null = null;
   let freshIndustry: string | null = null;
   let freshIcp: string | null = null;
-  if (websiteUrl && isVoiceEmpty(voice ?? null)) {
+  if (!cached && websiteUrl && isVoiceEmpty(voice ?? null)) {
     try {
       const { strategy, snapshot } = await strategyPipeline.generate({
         workspaceId: args.workspaceId,
@@ -339,11 +444,86 @@ export async function loadCmoSlowData(args: {
     }
   }
 
+  // Auto-detect social handles when websiteUrl is set and we haven't found them
+  // yet OR the cached handles look stale for the current site (e.g. user just
+  // switched the workspace to a different domain — old handles must not linger).
+  const currentVoice = freshVoice ?? voice ?? null;
+  const handleValues = Object.values(currentVoice?.socialHandles ?? {}).filter(
+    (v): v is string => typeof v === "string" && v.trim().length > 0
+  );
+  const hasHandles = handleValues.length > 0;
+  const currentHost = ((): string | null => {
+    if (!websiteUrl) return null;
+    try {
+      const u = websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`;
+      return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return null;
+    }
+  })();
+  const brandRoot = currentHost ? currentHost.split(".")[0] : null;
+  // Heuristic: if the brand slug (e.g. "anthropic" from anthropic.com) does
+  // NOT appear in any cached handle, the handles probably belong to a
+  // previous workspace site and should be refreshed.
+  const handlesLookStale =
+    hasHandles &&
+    !!brandRoot &&
+    !handleValues.some((v) => v.toLowerCase().includes(brandRoot));
+  // Same cache-aware guard as strategy regen — fresh snapshot means handle
+  // detection already ran for this URL during the previous cold load, so
+  // skip it to keep tab-switching free.
+  const shouldRunHandleDetect =
+    !cached && websiteUrl && (!hasHandles || handlesLookStale);
+  // When we're about to refresh stale handles, drop the old ones so the in-memory
+  // voice doesn't keep rendering the previous site's pills during this request.
+  if (handlesLookStale && currentVoice) {
+    currentVoice.socialHandles = undefined;
+  }
+  if (shouldRunHandleDetect) {
+    try {
+      const detected = await extractSocialHandles(websiteUrl);
+      if (Object.keys(detected.handles).length > 0) {
+        const mergedVoice: CmoVoiceProfile = {
+          ...(currentVoice ?? {}),
+          socialHandles: {
+            ...(currentVoice?.socialHandles ?? {}),
+            ...detected.handles,
+          },
+        };
+        try {
+          await prisma.workspace.update({
+            where: { id: args.workspaceId },
+            data: {
+              voiceProfile: JSON.parse(
+                JSON.stringify(mergedVoice)
+              ) as Prisma.InputJsonValue,
+            },
+          });
+        } catch (err) {
+          console.error("[cmo] failed to persist auto-detected social handles:", err);
+        }
+        if (freshVoice) {
+          freshVoice = mergedVoice;
+        } else {
+          // Reflect into the in-memory voice variable so this render shows them.
+          if (voice) {
+            voice.socialHandles = mergedVoice.socialHandles;
+          } else {
+            freshVoice = mergedVoice;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[cmo] social-handle auto-detect failed:", err);
+    }
+  }
+
   return {
     liveSnapshot,
     pageSpeed,
     gsc: gscData ?? { connected: gscConnected, rows: [], site: null },
     ga4: ga4Data ?? { connected: ga4Connected, rows: [], property: null },
+    ahrefs,
     llmAnalysis,
     freshVoice,
     freshIndustry,

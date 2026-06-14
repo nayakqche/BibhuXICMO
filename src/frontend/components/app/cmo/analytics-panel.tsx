@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -10,9 +11,14 @@ import {
   ExternalLink,
   Globe,
   Image as ImageIcon,
+  Link2,
+  Loader2,
+  RefreshCw,
+  Search,
   Sparkles,
   TrendingUp,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import {
@@ -25,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import type { CmoData } from "@/backend/agents/cmo-data";
 import type { LighthouseScores } from "@/backend/pagespeed";
+import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 
 function heuristicToLighthouse(
   h: NonNullable<CmoData["llmAnalysis"]>["heuristicLighthouse"]
@@ -70,28 +77,39 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Activity className="h-4 w-4 text-primary" aria-hidden />
-          Analytics
-          <span className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
-        </CardTitle>
-        <CardDescription>
-          On-page signals, performance scores, and AI/GEO presence.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Activity className="h-4 w-4 text-primary" aria-hidden />
+              Analytics
+              <span
+                className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-400"
+                aria-hidden
+              />
+            </CardTitle>
+            <CardDescription className="mt-1">
+              On-page signals, performance scores, and AI/GEO presence. Data is
+              cached locally — hit refresh after redeploys.
+            </CardDescription>
+          </div>
+          <RefreshButton />
+        </div>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
         <ConnectGoogleRow ga4={data.integrations.ga4} gsc={data.integrations.gsc} />
 
         <Tabs value={tab} onValueChange={onChange} className="flex flex-1 flex-col">
-          <TabsList className="flex flex-wrap self-start">
-            <TabsTrigger value="health">Health</TabsTrigger>
-            <TabsTrigger value="search">Search</TabsTrigger>
-            <TabsTrigger value="traffic">Traffic</TabsTrigger>
-            <TabsTrigger value="links">Links</TabsTrigger>
-            <TabsTrigger value="technical">Technical</TabsTrigger>
-            <TabsTrigger value="aigeo">AI / GEO</TabsTrigger>
-            <TabsTrigger value="checks">Checks</TabsTrigger>
-          </TabsList>
+          <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TabsList className="inline-flex w-auto min-w-full whitespace-nowrap">
+              <TabsTrigger value="health" className="text-xs">Health</TabsTrigger>
+              <TabsTrigger value="search" className="text-xs">Search</TabsTrigger>
+              <TabsTrigger value="traffic" className="text-xs">Traffic</TabsTrigger>
+              <TabsTrigger value="links" className="text-xs">Links</TabsTrigger>
+              <TabsTrigger value="technical" className="text-xs">Tech</TabsTrigger>
+              <TabsTrigger value="aigeo" className="text-xs">AI/GEO</TabsTrigger>
+              <TabsTrigger value="checks" className="text-xs">Checks</TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="health" className="flex-1">
             <HealthTab data={data} />
@@ -117,6 +135,37 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
         </Tabs>
       </CardContent>
     </Card>
+  );
+}
+
+function RefreshButton() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          await refreshCmoSlowDataAction();
+          router.refresh();
+          toast.message("Refreshing site signals", {
+            description: "Pulling fresh homepage scrape, PageSpeed, GA4 + GSC…",
+            duration: 4000,
+          });
+        })
+      }
+      title="Bypass the cache and re-fetch homepage, PageSpeed, GA4 + GSC"
+    >
+      {pending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className="h-3.5 w-3.5" />
+      )}
+      Refresh
+    </Button>
   );
 }
 
@@ -253,9 +302,16 @@ function HealthTab({ data }: { data: CmoData }) {
           <ScoreGrid label="Desktop" scores={data.pageSpeed.desktop} />
           {!pageSpeedOk ? (
             <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-              PageSpeed could not run for this URL right now. Add{" "}
-              <code className="rounded bg-muted px-1">PAGESPEED_API_KEY</code> for
-              higher quotas.
+              {data.pageSpeed?.error
+                ? data.pageSpeed.error
+                : (
+                  <>
+                    Lighthouse didn&rsquo;t return scores for this URL. Try
+                    a faster or less-protected site, or set{" "}
+                    <code className="rounded bg-muted px-1">PAGESPEED_API_KEY</code>{" "}
+                    for higher quotas.
+                  </>
+                )}
             </p>
           ) : null}
         </div>
@@ -467,10 +523,14 @@ function SearchTab({ data }: { data: CmoData }) {
 
 function TrafficTab({ data }: { data: CmoData }) {
   const llm = data.llmAnalysis;
+  const ahrefs = data.ahrefs.kind === "ready" ? data.ahrefs.snapshot : null;
 
   if (!data.ga4.connected) {
     return (
       <div className="space-y-3">
+        {ahrefs ? (
+          <AhrefsTrafficCard snapshot={ahrefs} stale={data.ahrefs.kind === "ready" && data.ahrefs.age === "stale"} />
+        ) : null}
         {llm ? (
           <div className="rounded-md border bg-muted/15 p-4 text-xs leading-relaxed">
             <div className="mb-2 flex items-center gap-1.5 font-semibold text-foreground">
@@ -572,9 +632,13 @@ function LinksTab({ data }: { data: CmoData }) {
   const internal = links.filter((l) => l.internal).length;
   const external = links.length - internal;
   const sample = links.slice(0, 8);
+  const ahrefs = data.ahrefs.kind === "ready" ? data.ahrefs.snapshot : null;
 
   return (
     <div className="space-y-3">
+      {ahrefs ? (
+        <AhrefsBacklinksCard snapshot={ahrefs} stale={data.ahrefs.kind === "ready" && data.ahrefs.age === "stale"} />
+      ) : null}
       <div className="grid grid-cols-3 gap-2 text-center">
         <Stat label="Total links" value={links.length} />
         <Stat label="Internal" value={internal} />
@@ -868,3 +932,263 @@ function BigStat({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+//  Ahrefs visualizations — surface the paid Apify snapshot in Traffic + Links
+// ---------------------------------------------------------------------------
+
+type AhrefsSnap = NonNullable<
+  Extract<CmoData["ahrefs"], { kind: "ready" }>
+>["snapshot"];
+
+function AhrefsTrafficCard({
+  snapshot,
+  stale,
+}: {
+  snapshot: AhrefsSnap;
+  stale: boolean;
+}) {
+  return (
+    <section className="rounded-lg border bg-gradient-to-br from-primary/5 via-transparent to-transparent p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-primary" aria-hidden />
+          <h3 className="text-sm font-semibold">Ahrefs traffic snapshot</h3>
+          {stale ? (
+            <Badge variant="outline" className="text-[10px]">
+              stale
+            </Badge>
+          ) : null}
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          via Apify · {snapshot.domain}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <AhrefsStat
+          label="Organic traffic / mo"
+          value={snapshot.organicTraffic}
+          formatter={formatCompactNum}
+          accent
+        />
+        <AhrefsStat
+          label="Tracked keywords"
+          value={snapshot.organicKeywords}
+          formatter={formatCompactNum}
+        />
+      </div>
+
+      {snapshot.topKeywords.length > 0 ? (
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Search className="h-3 w-3" /> Top organic keywords
+          </div>
+          <div className="overflow-hidden rounded-md border">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1.5 text-left">Keyword</th>
+                  <th className="px-2 py-1.5 text-right">Pos</th>
+                  <th className="px-2 py-1.5 text-right">Vol</th>
+                  <th className="px-2 py-1.5 text-right">Traffic</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {snapshot.topKeywords.slice(0, 8).map((k, i) => (
+                  <tr key={`${k.keyword}-${i}`} className="hover:bg-muted/30">
+                    <td className="px-2 py-1.5 font-medium">{k.keyword}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {k.position ?? "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {k.volume != null ? formatCompactNum(k.volume) : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {k.traffic != null ? formatCompactNum(k.traffic) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {snapshot.topCountries.length > 0 ? (
+        <div className="mt-3">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Globe className="h-3 w-3" /> Traffic by country
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {snapshot.topCountries.slice(0, 8).map((c) => {
+              // Apify actor doesn't return per-country traffic numbers in this view,
+              // only share — so we compute estimated traffic = total * share/100.
+              const estTraffic =
+                c.traffic != null
+                  ? c.traffic
+                  : c.share != null && snapshot.organicTraffic != null
+                    ? Math.round(
+                        snapshot.organicTraffic *
+                          (c.share > 1 ? c.share / 100 : c.share)
+                      )
+                    : null;
+              return (
+                <span
+                  key={c.country}
+                  className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px]"
+                >
+                  <span className="font-semibold uppercase">{c.country}</span>
+                  {estTraffic != null ? (
+                    <span className="font-mono text-muted-foreground">
+                      {formatCompactNum(estTraffic)}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <p className="mt-3 text-[10px] text-muted-foreground">
+        Want session-level breakdowns, conversions, and revenue?{" "}
+        <Link href="/integrations/ga4" className="underline-offset-2 hover:underline">
+          Connect Google Analytics
+        </Link>
+        .
+      </p>
+    </section>
+  );
+}
+
+function AhrefsBacklinksCard({
+  snapshot,
+  stale,
+}: {
+  snapshot: AhrefsSnap;
+  stale: boolean;
+}) {
+  const drColor =
+    snapshot.domainRating == null
+      ? "text-muted-foreground"
+      : snapshot.domainRating >= 70
+        ? "text-emerald-500"
+        : snapshot.domainRating >= 40
+          ? "text-amber-500"
+          : "text-red-500";
+
+  return (
+    <section className="rounded-lg border bg-gradient-to-br from-primary/5 via-transparent to-transparent p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-primary" aria-hidden />
+          <h3 className="text-sm font-semibold">Ahrefs backlink profile</h3>
+          {stale ? (
+            <Badge variant="outline" className="text-[10px]">
+              stale
+            </Badge>
+          ) : null}
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          via Apify · {snapshot.domain}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md border bg-card/50 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Domain Rating
+          </div>
+          <div className={`mt-1 text-2xl font-semibold tabular-nums ${drColor}`}>
+            {snapshot.domainRating ?? "—"}
+            {snapshot.domainRating != null ? (
+              <span className="ml-1 text-xs text-muted-foreground">/ 100</span>
+            ) : null}
+          </div>
+        </div>
+        <AhrefsStat
+          label="Backlinks"
+          value={snapshot.backlinks}
+          formatter={formatCompactNum}
+        />
+        <AhrefsStat
+          label="Referring domains"
+          value={snapshot.referringDomains}
+          formatter={formatCompactNum}
+        />
+        <AhrefsStat
+          label="Ahrefs Rank"
+          value={snapshot.ahrefsRank}
+          formatter={(n) => `#${formatCompactNum(n)}`}
+        />
+      </div>
+
+      {snapshot.dofollowBacklinks != null ||
+      snapshot.dofollowReferringDomains != null ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Dofollow:{" "}
+          <span className="font-mono text-foreground">
+            {snapshot.dofollowBacklinks != null
+              ? formatCompactNum(snapshot.dofollowBacklinks)
+              : "—"}
+          </span>{" "}
+          backlinks ·{" "}
+          <span className="font-mono text-foreground">
+            {snapshot.dofollowReferringDomains != null
+              ? formatCompactNum(snapshot.dofollowReferringDomains)
+              : "—"}
+          </span>{" "}
+          referring domains
+        </p>
+      ) : null}
+
+      <p className="mt-3 text-[10px] text-muted-foreground">
+        Want per-page backlink lists and broken-link opportunities? See the{" "}
+        <Link href="/agents/seo" className="underline-offset-2 hover:underline">
+          SEO Agent
+        </Link>
+        .
+      </p>
+    </section>
+  );
+}
+
+function AhrefsStat({
+  label,
+  value,
+  formatter,
+  accent,
+}: {
+  label: string;
+  value: number | null;
+  formatter?: (n: number) => string;
+  accent?: boolean;
+}) {
+  const display =
+    value == null ? "—" : formatter ? formatter(value) : value.toLocaleString();
+  return (
+    <div className="rounded-md border bg-card/50 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={
+          "mt-1 text-2xl font-semibold tabular-nums " +
+          (accent ? "text-primary" : "text-foreground")
+        }
+      >
+        {display}
+      </div>
+    </div>
+  );
+}
+
+function formatCompactNum(n: number): string {
+  if (Math.abs(n) >= 1_000_000)
+    return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (Math.abs(n) >= 1_000)
+    return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
+  return n.toLocaleString();
+}
+
