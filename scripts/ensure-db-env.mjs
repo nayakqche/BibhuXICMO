@@ -1,17 +1,28 @@
 /**
- * Normalizes Supabase Postgres URLs before Prisma connects.
+ * Normalizes Postgres URLs before Prisma connects (Supabase pooler, Render, etc.).
  *
- * Render start runs this first so a single DATABASE_URL (transaction pooler)
- * is enough — DIRECT_URL is derived automatically when omitted.
- *
- * Usage:
- *   node scripts/ensure-db-env.mjs          # validate + print summary
- *   node scripts/ensure-db-env.mjs --export # print shell exports for bash
+ * Render start runs this first so a single DATABASE_URL is enough —
+ * DIRECT_URL is derived automatically when omitted.
  */
 import process from "node:process";
 
+function isRenderInternalPostgres(url) {
+  try {
+    const u = new URL(url);
+    // Render private network: dpg-xxxxx-a or *.internal.render.com
+    return (
+      /-internal\.render\.com$/i.test(u.hostname) ||
+      /^dpg-[a-z0-9]+-a$/i.test(u.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function ensureSsl(url) {
   if (/sslmode=/i.test(url)) return url;
+  // Render internal Postgres does not need (and may reject) forced TLS.
+  if (isRenderInternalPostgres(url)) return url;
   return url + (url.includes("?") ? "&" : "?") + "sslmode=require";
 }
 
@@ -54,7 +65,7 @@ function maskUrl(url) {
 const raw = process.env.DATABASE_URL?.trim();
 if (!raw) {
   console.error("[db] ERROR: DATABASE_URL is not set in Render → Environment.");
-  console.error("[db] Add your Supabase transaction pooler URL (port 6543).");
+  console.error("[db] Use Render Postgres internal URL OR Supabase pooler URL.");
   process.exit(1);
 }
 

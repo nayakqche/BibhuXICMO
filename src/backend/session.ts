@@ -34,20 +34,25 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await auth();
   if (!session?.user?.id) return null;
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { id: true, name: true, email: true, image: true },
-  });
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { id: true, name: true, email: true, image: true },
+    });
 
-  if (!user) {
-    await clearAuthSessionCookies();
+    if (!user) {
+      await clearAuthSessionCookies();
+      return null;
+    }
+
+    return {
+      id: user.id,
+      name: user.name ?? session.user.name ?? null,
+      email: user.email,
+      image: user.image,
+    };
+  } catch (err) {
+    console.error("[session] database lookup failed:", err);
     return null;
   }
-
-  return {
-    id: user.id,
-    name: user.name ?? session.user.name ?? null,
-    email: user.email,
-    image: user.image,
-  };
 }
