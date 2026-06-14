@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { redirect } from "next/navigation";
-import { auth } from "@/backend/auth";
+import { getSessionUser } from "@/backend/session";
 import { prisma } from "@/backend/db";
 import { ensureUserWorkspace } from "@/backend/workspace";
 import { normalizeUrl } from "@/backend/scraper/fetch";
@@ -21,8 +21,8 @@ export async function startOnboardingAction(
   _prev: OnboardResult | null,
   formData: FormData
 ): Promise<OnboardResult> {
-  const session = await auth();
-  if (!session?.user?.id) return { ok: false, error: "Not signed in" };
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: "Not signed in" };
 
   const parsed = schema.safeParse({ websiteUrl: formData.get("websiteUrl") });
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -36,7 +36,7 @@ export async function startOnboardingAction(
     return { ok: false, error: "That does not look like a valid URL." };
   }
 
-  const membership = await ensureUserWorkspace(session.user.id, session.user.name);
+  const membership = await ensureUserWorkspace(user.id, user.name);
   const workspace = membership.workspace;
 
   // Save the URL up front so we never lose it, even if the strategy LLM fails.
@@ -144,10 +144,10 @@ export async function startOnboardingAction(
  * starter checklist of action items.
  */
 export async function skipOnboardingAction() {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/login");
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
 
-  const membership = await ensureUserWorkspace(session.user.id, session.user.name);
+  const membership = await ensureUserWorkspace(user.id, user.name);
   if (!membership.workspace.websiteUrl) {
     await prisma.workspace.update({
       where: { id: membership.workspace.id },

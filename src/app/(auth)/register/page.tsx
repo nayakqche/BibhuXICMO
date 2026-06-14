@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/backend/auth";
 import { redirect } from "next/navigation";
+import { getSessionUser } from "@/backend/session";
 import { RegisterForm } from "./form";
 import { OAuthButtons } from "../oauth-buttons";
 import { Separator } from "@/frontend/components/ui/separator";
@@ -12,8 +12,8 @@ import {
 export const metadata = { title: "Create an account" };
 
 export default async function RegisterPage() {
-  const session = await auth();
-  if (session?.user) redirect("/dashboard");
+  const user = await getSessionUser();
+  if (user) redirect("/dashboard");
 
   const showGoogle = oauthGoogleEnabled();
   const showGithub = oauthGithubEnabled();
