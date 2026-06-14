@@ -14,6 +14,9 @@ const envSchema = z.object({
   DIRECT_URL: z.string().optional(),
   REDIS_URL: z.string().default("redis://localhost:6379"),
 
+  // Optional: public URL when using a custom domain (overrides *.onrender.com).
+  CANONICAL_APP_URL: z.string().url().optional(),
+
   AUTH_SECRET: z.string().min(1).default("dev-secret-change-me"),
   AUTH_URL: z.string().url().optional(),
 
@@ -185,21 +188,41 @@ const envSchema = z.object({
   NEXT_PUBLIC_REDDIT_AGENT_URL: z.string().url().optional(),
 });
 
-/** Vercel sets VERCEL_URL (no scheme); derive public URLs when app env is unset. */
-function withVercelDefaults(input: NodeJS.ProcessEnv) {
+/** Vercel / Render set host URLs without app env — derive public URLs when unset. */
+function withDeployDefaults(input: NodeJS.ProcessEnv) {
   const fromVercel =
     input.VERCEL_URL != null && input.VERCEL_URL.length > 0
       ? `https://${input.VERCEL_URL}`
       : undefined;
+
+  const renderExternal = input.RENDER_EXTERNAL_URL?.trim();
+  const fromRender =
+    renderExternal && renderExternal.length > 0
+      ? renderExternal.startsWith("http")
+        ? renderExternal
+        : `https://${renderExternal}`
+      : undefined;
+
+  // Optional override when the public site is on a custom domain (e.g. xicmo.com)
+  // but Render still reports *.onrender.com as RENDER_EXTERNAL_URL.
+  const canonical = input.CANONICAL_APP_URL?.trim();
+
+  const publicUrl =
+    canonical ||
+    input.NEXT_PUBLIC_APP_URL ||
+    input.APP_URL ||
+    fromVercel ||
+    fromRender;
+
   return {
     ...input,
-    NEXT_PUBLIC_APP_URL: input.NEXT_PUBLIC_APP_URL ?? fromVercel,
-    APP_URL: input.APP_URL ?? input.NEXT_PUBLIC_APP_URL ?? fromVercel,
-    AUTH_URL: input.AUTH_URL ?? input.NEXT_PUBLIC_APP_URL ?? fromVercel,
+    NEXT_PUBLIC_APP_URL: publicUrl,
+    APP_URL: input.APP_URL ?? publicUrl,
+    AUTH_URL: input.AUTH_URL ?? publicUrl,
   };
 }
 
-const parsed = envSchema.safeParse(withVercelDefaults(process.env));
+const parsed = envSchema.safeParse(withDeployDefaults(process.env));
 
 if (!parsed.success) {
   console.error("Invalid environment variables:", parsed.error.flatten().fieldErrors);

@@ -17,7 +17,8 @@
 # tier spins down after 15 min idle, which adds cold-start latency.
 
 # Postgres is hosted on Supabase (not Render). Set DATABASE_URL + DIRECT_URL
-# in the web service env below using your Supabase connection strings.
+# in the xicmo-web Environment tab using your Supabase connection strings.
+# You can delete the old Render Postgres (xicmo-db) service if it still exists.
 
 services:
   # ------------------------------------------------------------------
@@ -49,9 +50,9 @@ services:
       - key: NODE_ENV
         value: production
       # ----- Supabase Postgres -----
-      # DATABASE_URL  = transaction pooler (port 6543, append ?pgbouncer=true&connection_limit=1)
-      # DIRECT_URL    = session pooler / direct (port 5432) — used by `prisma db push`
-      # Get both from Supabase → Project Settings → Database → Connection string.
+      # DATABASE_URL = transaction pooler (port 6543, ?pgbouncer=true&connection_limit=1)
+      # DIRECT_URL   = session pooler / direct (port 5432) for prisma db push
+      # Supabase → Project Settings → Database → Connection string
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
@@ -71,6 +72,9 @@ services:
       - key: APP_URL
         sync: false
       - key: AUTH_URL
+        sync: false
+      # Set to your custom domain (e.g. https://xicmo.com) so OAuth matches xicmo.com.
+      - key: CANONICAL_APP_URL
         sync: false
 
       # ----- LLM keys (add what you have) -----

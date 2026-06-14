@@ -24,6 +24,30 @@ function probe(name: string) {
   };
 }
 
+function dbProbe() {
+  const raw = process.env.DATABASE_URL?.trim();
+  if (!raw) return { set: false };
+  try {
+    const u = new URL(raw);
+    let provider: "supabase" | "render" | "other" = "other";
+    if (/supabase/i.test(u.hostname)) provider = "supabase";
+    else if (
+      /render\.com$/i.test(u.hostname) ||
+      /^dpg-[a-z0-9]+-a$/i.test(u.hostname)
+    ) {
+      provider = "render";
+    }
+    return {
+      set: true,
+      provider,
+      host: u.hostname,
+      port: u.port || "5432",
+    };
+  } catch {
+    return { set: true, provider: "invalid" as const, host: null };
+  }
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const live = url.searchParams.get("live") === "1";
@@ -48,6 +72,9 @@ export async function GET(req: Request) {
 
     // critical for register / login
     DATABASE_URL: probe("DATABASE_URL"),
+    database: dbProbe(),
+    DIRECT_URL: probe("DIRECT_URL"),
+    CANONICAL_APP_URL: probe("CANONICAL_APP_URL"),
     AUTH_SECRET: probe("AUTH_SECRET"),
     AUTH_URL: probe("AUTH_URL"),
     NEXT_PUBLIC_APP_URL: probe("NEXT_PUBLIC_APP_URL"),
