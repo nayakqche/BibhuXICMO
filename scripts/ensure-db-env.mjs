@@ -65,7 +65,7 @@ function maskUrl(url) {
 const raw = process.env.DATABASE_URL?.trim();
 if (!raw) {
   console.error("[db] ERROR: DATABASE_URL is not set in Render → Environment.");
-  console.error("[db] Use Render Postgres internal URL OR Supabase pooler URL.");
+  console.error("[db] Add your Supabase transaction pooler URL (port 6543).");
   process.exit(1);
 }
 

@@ -16,14 +16,9 @@
 # web service + database to "starter" once you have traffic — the free web
 # tier spins down after 15 min idle, which adds cold-start latency.
 
-# Postgres: use Render (xicmo-db below) OR Supabase — pick ONE and point
-# DATABASE_URL at it. Mixing hosts (users on Render, app on Supabase) breaks auth.
-
-databases:
-  - name: xicmo-db
-    databaseName: xicmo
-    user: xicmo
-    plan: free
+# Postgres is hosted on Supabase (not Render). Set DATABASE_URL + DIRECT_URL
+# in the xicmo-web Environment tab using your Supabase connection strings.
+# You can delete the old Render Postgres (xicmo-db) service if it still exists.
 
 services:
   # ------------------------------------------------------------------
@@ -54,17 +49,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # ----- Postgres (pick Render xicmo-db OR paste Supabase URL manually) -----
-      # Default: Render internal connection (keeps users in xicmo-db).
-      # To use Supabase instead, override DATABASE_URL in the dashboard.
+      # ----- Supabase Postgres -----
+      # DATABASE_URL = transaction pooler (port 6543, ?pgbouncer=true&connection_limit=1)
+      # DIRECT_URL   = session pooler / direct (port 5432) for prisma db push
+      # Supabase → Project Settings → Database → Connection string
       - key: DATABASE_URL
-        fromDatabase:
-          name: xicmo-db
-          property: connectionString
+        sync: false
       - key: DIRECT_URL
-        fromDatabase:
-          name: xicmo-db
-          property: connectionString
+        sync: false
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -81,7 +73,7 @@ services:
         sync: false
       - key: AUTH_URL
         sync: false
-      # Set to your custom domain so OAuth + Auth.js match xicmo.com (not *.onrender.com).
+      # Set to your custom domain (e.g. https://xicmo.com) so OAuth matches xicmo.com.
       - key: CANONICAL_APP_URL
         sync: false
 
