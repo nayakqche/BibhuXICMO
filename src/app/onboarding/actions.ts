@@ -4,6 +4,7 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { auth } from "@/backend/auth";
 import { prisma } from "@/backend/db";
+import { ensureUserWorkspace } from "@/backend/workspace";
 import { normalizeUrl } from "@/backend/scraper/fetch";
 import { generateStrategy } from "@/backend/agents/strategy";
 import { Priority } from "@prisma/client";
@@ -35,13 +36,7 @@ export async function startOnboardingAction(
     return { ok: false, error: "That does not look like a valid URL." };
   }
 
-  const membership = await prisma.workspaceMember.findFirst({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-    include: { workspace: true },
-  });
-
-  if (!membership) return { ok: false, error: "No workspace found" };
+  const membership = await ensureUserWorkspace(session.user.id, session.user.name);
   const workspace = membership.workspace;
 
   // Save the URL up front so we never lose it, even if the strategy LLM fails.
@@ -152,13 +147,7 @@ export async function skipOnboardingAction() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const membership = await prisma.workspaceMember.findFirst({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-    include: { workspace: true },
-  });
-  if (!membership) redirect("/login");
-
+  const membership = await ensureUserWorkspace(session.user.id, session.user.name);
   if (!membership.workspace.websiteUrl) {
     await prisma.workspace.update({
       where: { id: membership.workspace.id },
