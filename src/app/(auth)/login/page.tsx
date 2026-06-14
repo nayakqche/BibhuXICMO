@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/backend/auth";
 import { redirect } from "next/navigation";
+import { getSessionUser } from "@/backend/session";
 import { LoginForm } from "./form";
 import { OAuthButtons } from "../oauth-buttons";
 import { Separator } from "@/frontend/components/ui/separator";
@@ -16,10 +16,10 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ callbackUrl?: string; email?: string }>;
 }) {
-  const session = await auth();
+  const user = await getSessionUser();
   const { callbackUrl, email } = await searchParams;
 
-  if (session?.user) redirect(callbackUrl || "/dashboard");
+  if (user) redirect(callbackUrl || "/dashboard");
 
   const showGoogle = oauthGoogleEnabled();
   const showGithub = oauthGithubEnabled();
