@@ -76,7 +76,7 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
             <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <div className="space-y-0.5">
               <div className="font-semibold text-foreground">
-                Analyzing {stripUrlScheme(data.workspace.websiteUrl)}…
+                Analyzing {stripUrlScheme(data.workspace.websiteUrl ?? "")}…
               </div>
               <p className="text-muted-foreground">
                 Claude is reading the site, picking competitors + social
