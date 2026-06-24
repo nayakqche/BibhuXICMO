@@ -23,7 +23,7 @@ export const strategySchema = z.object({
   channels: z
     .array(z.enum(["reddit", "seo", "geo", "x", "linkedin", "hackernews", "content"]))
     .describe("Best marketing channels for this business"),
-  competitors: z.array(z.string()).max(10),
+  competitors: z.array(z.string()).max(12),
   topicClusters: z
     .array(
       z.object({
@@ -48,10 +48,10 @@ export type Strategy = z.infer<typeof strategySchema>;
 const SYSTEM_PROMPT = `You are a senior marketing strategist. Given a single web page snapshot, infer the business model, target audience, positioning, and the highest-leverage marketing channels. Be concrete — reference specifics from the page text. If information is missing, make the best inference and mark it as such in the field.
 
 Hard requirements:
-- competitors: ALWAYS list 3-6 real, well-known direct competitors that target the same ICP. Never leave this empty. If the niche is unclear, use the closest analog category leaders.
+- competitors: ALWAYS list 8-10 real, well-known direct competitors that target the same ICP. Never list fewer than 8 and never leave this empty. If the niche is unclear, use the closest analog category leaders, including both regional and global players.
   IMPORTANT FORMAT — each competitor MUST be written as "BrandName (canonical-domain.com)".
   Examples: "Jasper AI (jasper.ai)", "HubSpot Marketing Hub (hubspot.com)", "Surfer SEO (surferseo.com)", "Notion (notion.so)".
-  Do NOT include http:// or www. — just the bare brand domain in parentheses. This lets the UI render real logos.
+  Do NOT include http:// or www. — just the bare brand domain in parentheses. The domain MUST be the real, currently-live homepage domain (double-check it resolves) so the UI can render real logos. If you are unsure of the exact domain, pick a competitor whose domain you are certain of instead.
 - topicClusters: at least 1 cluster with 3+ keywords.
 - valueProps: 3-5 concrete prop sentences (no fluff).`;
 

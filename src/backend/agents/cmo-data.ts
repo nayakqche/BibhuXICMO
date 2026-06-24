@@ -254,7 +254,7 @@ export async function loadCmoFastData(args: {
     : [];
 
   const topCompetitors = Array.isArray(voice?.competitors)
-    ? voice.competitors.slice(0, 6)
+    ? voice.competitors.slice(0, 12)
     : [];
 
   return {
