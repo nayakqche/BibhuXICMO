@@ -29,29 +29,36 @@ export function CompetitorPill({
   competitor: string;
   size?: "sm" | "md";
 }) {
-  const { name, domain } = parseCompetitor(competitor);
+  const { name, domain, verified } = parseCompetitor(competitor);
   const [iconStep, setIconStep] = useState(0);
   const px = size === "sm" ? 14 : 18;
   const containerSize = size === "sm" ? "h-6" : "h-7";
   const textSize = size === "sm" ? "text-[11px]" : "text-xs";
 
-  const href = domain ? `https://${domain}` : undefined;
-  const Wrapper: React.ElementType = href ? "a" : "span";
-  const wrapperProps = href
-    ? { href, target: "_blank", rel: "noreferrer noopener" }
-    : {};
-
+  // Only treat a domain as linkable when we trust it (curated map, LLM
+  // parenthetical, or a literal URL/domain in the input). The slug+".com"
+  // fallback used to fabricate broken links like "fourthpartnerenergy.com"
+  // when the real site is fourthpartner.co — so for unverified guesses we
+  // route the click to a Google search instead and skip the favicon (which
+  // would 404 anyway).
+  const href = verified && domain
+    ? `https://${domain}`
+    : `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+  const showFavicon = verified && !!domain;
+  const tooltip = verified && domain ? `${name} · ${domain}` : `${name} — search`;
   return (
-    <Wrapper
-      title={domain ? `${name} · ${domain}` : name}
-      className={`inline-flex ${containerSize} items-center gap-1.5 rounded-md border bg-background pl-1.5 pr-2 ${textSize} font-medium text-foreground transition-colors ${href ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-80"}`}
-      {...wrapperProps}
+    <a
+      title={tooltip}
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={`inline-flex ${containerSize} items-center gap-1.5 rounded-md border bg-background pl-1.5 pr-2 ${textSize} font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5`}
     >
       <span
         className="flex shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted"
         style={{ width: px, height: px }}
       >
-        {domain && iconStep < 2 ? (
+        {showFavicon && domain && iconStep < 2 ? (
           <Image
             src={
               iconStep === 0
@@ -75,13 +82,25 @@ export function CompetitorPill({
         )}
       </span>
       <span className="max-w-[12ch] truncate">{name}</span>
-    </Wrapper>
+    </a>
   );
 }
 
-function parseCompetitor(raw: string): { name: string; domain: string | null } {
+/**
+ * `verified` is true only when the domain came from a trusted source —
+ * curated map, LLM parenthetical, or a literal URL/domain the caller
+ * passed in. The old slug+".com" fallback fabricated broken links
+ * (e.g. "Fourth Partner Energy" → fourthpartnerenergy.com when the real
+ * site is fourthpartner.co), so we now mark that case unverified and
+ * the pill routes clicks to a Google search instead.
+ */
+function parseCompetitor(raw: string): {
+  name: string;
+  domain: string | null;
+  verified: boolean;
+} {
   const input = raw.trim();
-  if (!input) return { name: raw, domain: null };
+  if (!input) return { name: raw, domain: null, verified: false };
 
   // Split off the display name + any "(domain.tld)" the strategy LLM appended.
   let name = input;
@@ -97,10 +116,10 @@ function parseCompetitor(raw: string): { name: string; domain: string | null } {
   //    guess (which is often wrong, e.g. "Atria (atria.ai)" → tryatria.com).
   const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, "");
   const mapped = BRAND_DOMAIN_MAP[normalized];
-  if (mapped) return { name, domain: mapped };
+  if (mapped) return { name, domain: mapped, verified: true };
 
   // 2. Otherwise trust the LLM-supplied parenthetical domain.
-  if (parenDomain) return { name, domain: parenDomain };
+  if (parenDomain) return { name, domain: parenDomain, verified: true };
 
   // 3. Bare domain / full URL input ("jasper.ai" / "https://jasper.ai/foo").
   const stripped = stripScheme(input);
@@ -110,12 +129,13 @@ function parseCompetitor(raw: string): { name: string; domain: string | null } {
     return {
       name: isPureDomain ? firstToken.replace(/^www\./, "") : input,
       domain: firstToken.toLowerCase().replace(/^www\./, ""),
+      verified: true,
     };
   }
 
-  // 4. Last-resort heuristic: slugify + ".com".
-  if (normalized.length === 0) return { name: input, domain: null };
-  return { name: input, domain: `${normalized}.com` };
+  // 4. Last-resort: name only, no fabricated domain. The pill will link to
+  //    a Google search for `name` and skip the favicon.
+  return { name: input, domain: null, verified: false };
 }
 
 function stripScheme(s: string): string {
@@ -229,6 +249,25 @@ const BRAND_DOMAIN_MAP: Record<string, string> = {
   meta: "meta.com",
   microsoft: "microsoft.com",
   apple: "apple.com",
+
+  // Renewable-energy / climate
+  fourthpartner: "fourthpartner.co",
+  fourthpartnerenergy: "fourthpartner.co",
+  ayanarenewable: "ayanarenewable.com",
+  ayana: "ayanarenewable.com",
+  renew: "renew.com",
+  renewpower: "renew.com",
+  greko: "grekoresources.com",
+  azurepower: "azurepower.com",
+  adanigreen: "adanigreenenergy.com",
+  tatapower: "tatapower.com",
+  tatapowerrenewable: "tatapower-ddl.com",
+  acmesolar: "acme.in",
+  vibrantenergy: "vibrantenergy.in",
+  cleanmax: "cleanmax.com",
+  amplus: "amplussolar.com",
+  amplussolar: "amplussolar.com",
+  hexaclimate: "hexaclimate.com",
 
   // Indian-context shopping (just in case)
   flipkart: "flipkart.com",
