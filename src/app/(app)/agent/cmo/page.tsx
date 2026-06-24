@@ -68,24 +68,29 @@ export default async function CmoAgentPage() {
 
       <TerminalPanel lines={terminalLines} />
 
-      {/* 4-col layout: Company | Analytics | Actions | Chat (always visible on the right) */}
-      <div className="grid gap-5 xl:grid-cols-12">
-        <div className="xl:col-span-3">
+      {/*
+        Responsive density: a single 4-up row only when there's genuinely
+        room for it (2xl ≥ 1536px). Below that we drop to a roomy 2×2 grid
+        so each panel keeps a comfortable width instead of squashing text
+        to one word per line. Stacks to a single column on small screens.
+      */}
+      <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-4">
+        <div>
           <Suspense fallback={<CompanyPanel data={fast} />}>
             <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div className="xl:col-span-3">
+        <div>
           <Suspense fallback={<AnalyticsSkeleton />}>
             <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div className="xl:col-span-3 flex flex-col gap-5">
+        <div className="flex flex-col gap-5">
           <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
             <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
           </Suspense>
         </div>
-        <div className="xl:col-span-3 min-h-[640px]">
+        <div className="min-h-[640px]">
           <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
         </div>
       </div>
@@ -125,7 +130,7 @@ async function CompanyPanelWithLive({
         ...fast,
         voice: slow.freshVoice,
         topCompetitors: Array.isArray(slow.freshVoice.competitors)
-          ? slow.freshVoice.competitors.slice(0, 6)
+          ? slow.freshVoice.competitors.slice(0, 12)
           : fast.topCompetitors,
         workspace: {
           ...fast.workspace,
