@@ -344,7 +344,7 @@ export function RedditAgentClient({ apiBase }: { apiBase: string | null }) {
                   variant="outline"
                   className="gap-1.5 border-amber-500/30 text-[10px] text-amber-600 dark:text-amber-300"
                 >
-                  <AlertTriangle className="h-3 w-3" /> APIFY_TOKEN_REDDIT not
+                  <AlertTriangle className="h-3 w-3" /> Reddit data provider not
                   configured
                 </Badge>
               ) : null}

@@ -109,9 +109,7 @@ export function SocialHandlesCard({
         });
       } else {
         toast.success(
-          `Found ${found} handle${found === 1 ? "" : "s"}${
-            res.source === "claude" ? " (via Claude)" : ""
-          }`,
+          `Found ${found} handle${found === 1 ? "" : "s"}`,
           { description: "Review below and save when ready." }
         );
       }
@@ -128,7 +126,7 @@ export function SocialHandlesCard({
           </CardTitle>
           <CardDescription>
             Public accounts so agents can learn your voice and route posts.
-            Auto-detect pulls them from your homepage with Claude.
+            Auto-detect pulls them from your homepage.
           </CardDescription>
         </div>
         <Button
@@ -139,7 +137,7 @@ export function SocialHandlesCard({
           disabled={isDetecting || !hasWebsiteUrl}
           title={
             hasWebsiteUrl
-              ? "Fetch your homepage and let Claude pick the canonical handles"
+              ? "Fetch your homepage and detect the canonical handles"
               : "Add a website URL above first"
           }
         >

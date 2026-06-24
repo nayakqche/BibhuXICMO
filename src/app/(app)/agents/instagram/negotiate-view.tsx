@@ -712,8 +712,8 @@ function SettingsModal({ hasCookies, onClose }: { hasCookies: boolean; onClose: 
   return (
     <ModalShell title="Settings" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
-        Paste your Instagram cookies (JSON array) here. These are needed to send DMs via the Apify
-        automation actor. Required cookies: <code>sessionid</code>, <code>ds_user_id</code>, <code>csrftoken</code>.
+        Paste your Instagram cookies (JSON array) here. These are needed to send DMs through the
+        automation backend. Required cookies: <code>sessionid</code>, <code>ds_user_id</code>, <code>csrftoken</code>.
       </p>
       <div className="mt-3">
         <Label>Instagram Cookies (JSON)</Label>
@@ -743,7 +743,7 @@ function SettingsModal({ hasCookies, onClose }: { hasCookies: boolean; onClose: 
 
       <div className="mt-5 border-t pt-4">
         <p className="text-xs text-muted-foreground">
-          Troubleshoot: send a real test DM to verify the Apify actor + cookies are working end-to-end.
+          Troubleshoot: send a real test DM to verify your cookies are working end-to-end.
         </p>
         <div className="mt-2">
           <Label>Test Username</Label>

@@ -76,7 +76,7 @@ export const AGENTS: AgentCard[] = [
     name: "GEO Agent",
     tagline: "AI Search Visibility",
     description:
-      "Gets your brand cited in ChatGPT, Claude, Perplexity, and Google AI Overviews.",
+      "Gets your brand cited across the major AI answer engines.",
     icon: Sparkles,
     accent: "from-purple-500/20 to-fuchsia-500/10",
   },
@@ -198,7 +198,7 @@ export const FAQS: Faq[] = [
   },
   {
     q: "What is GEO (AI Search Visibility)?",
-    a: "GEO = Generative Engine Optimization. We regularly query ChatGPT, Claude, Perplexity, and Google's AI Overviews with prompts relevant to your business, check whether your brand is cited, and compute a weekly GEO score so you can see trends and act on gaps.",
+    a: "GEO = Generative Engine Optimization. We regularly query the major AI answer engines with prompts relevant to your business, check whether your brand is cited, and compute a weekly GEO score so you can see trends and act on gaps.",
   },
   {
     q: "How long until I see results?",

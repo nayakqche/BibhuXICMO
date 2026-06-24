@@ -358,7 +358,7 @@ export function InfluencerFind({
       if (Date.now() - r.startedAt > MAX_RUN_MS) {
         toast.error("Discovery timed out", {
           description:
-            "The Apify run is taking longer than 15 minutes. Check the Apify console — results may still arrive later.",
+            "Discovery is taking longer than 15 minutes — results may still arrive later.",
         });
         clearRunState();
         return;
@@ -411,8 +411,8 @@ export function InfluencerFind({
       .filter(Boolean);
 
     if (!hasApifyToken) {
-      toast.error("Apify token missing", {
-        description: "Set APIFY_TOKEN (or APIFY_IG_TOKEN) in Render → Environment.",
+      toast.error("Discovery isn't configured", {
+        description: "Instagram discovery hasn't been enabled on this workspace.",
       });
       return;
     }
@@ -489,13 +489,13 @@ export function InfluencerFind({
     if (!run) return;
     if (
       !confirm(
-        "Stop polling for this run? The Apify job will keep running on the server and you'll be billed for any profiles it analyzes before it finishes. Refresh this page later to pick up results."
+        "Stop polling for this run? The job will keep running on the server and you'll be billed for any profiles it analyzes before it finishes. Refresh this page later to pick up results."
       )
     ) {
       return;
     }
     clearRunState();
-    toast.info("Stopped polling. The Apify job will finish in the background.");
+    toast.info("Stopped polling. The job will finish in the background.");
   }
 
   // ---------- Template ----------
@@ -751,7 +751,7 @@ export function InfluencerFind({
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                $0.01 per analyzed profile on Apify.
+                $0.01 per analyzed profile.
               </p>
             </div>
             <div>
@@ -882,8 +882,7 @@ export function InfluencerFind({
 
           {!hasApifyToken && (
             <p className="text-center text-xs text-amber-600 dark:text-amber-400">
-              Set <code>APIFY_TOKEN</code> (or <code>APIFY_IG_TOKEN</code>) in
-              Render → Environment to enable.
+              Instagram discovery isn&rsquo;t enabled on this workspace.
             </p>
           )}
         </CardContent>
@@ -1184,7 +1183,7 @@ export function InfluencerFind({
 
       <p className="text-center text-xs text-muted-foreground">
         <Instagram className="mr-1 inline h-3 w-3" />
-        Powered by Apify · Built for influencer discovery
+        Built for influencer discovery
       </p>
     </div>
   );

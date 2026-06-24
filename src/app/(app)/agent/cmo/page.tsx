@@ -192,7 +192,7 @@ function AnalyticsSkeleton() {
             Loading site signals (typically 30–60s on first run)
           </div>
           <p className="text-[11px] text-muted-foreground/80">
-            Scraping homepage · running Google Lighthouse · fetching Ahrefs (DR, traffic, keywords) · running Claude strategy analysis.
+            Scraping homepage · checking page performance · fetching SEO metrics · running strategy analysis.
             Persistent cache (1h) — survives redeploys + cold starts. Hit&nbsp;
             <span className="font-medium text-foreground/80">Refresh</span>&nbsp;in the Analytics panel for fresh data.
           </p>

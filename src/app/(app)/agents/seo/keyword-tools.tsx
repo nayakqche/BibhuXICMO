@@ -228,9 +228,9 @@ function RunningPanel({ elapsedMs, statusMsg }: { elapsedMs: number; statusMsg?:
       <CardContent className="flex items-center gap-3 py-4 text-sm">
         <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium">Running on Apify…</div>
+          <div className="font-medium">Running…</div>
           <div className="text-xs text-muted-foreground">
-            {statusMsg ? statusMsg : "Spinning up the actor and scraping Ahrefs."}{" "}
+            {statusMsg ? statusMsg : "Spinning up the scrape."}{" "}
             <span className="tabular-nums">{seconds}s</span> elapsed · usually 30-90s.
           </div>
         </div>

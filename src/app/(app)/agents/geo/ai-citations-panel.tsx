@@ -131,7 +131,7 @@ export function AiCitationsPanel({
       return;
     }
     pollAbort.current = { cancelled: false };
-    setStatusMsg("Starting Apify run…");
+    setStatusMsg("Starting AI citations check…");
     startTransition(async () => {
       const res = await startAiCitationsRunAction({ domain });
       if (!res.ok) {
@@ -147,11 +147,11 @@ export function AiCitationsPanel({
       }
       // Poll until the actor finishes (typically 30-90s).
       const start = Date.now();
-      setStatusMsg("Running on Apify… first call can take 60–90s.");
+      setStatusMsg("Running… first call can take 60–90s.");
       while (!pollAbort.current.cancelled) {
         await new Promise((r) => setTimeout(r, 4000));
         const elapsed = Math.round((Date.now() - start) / 1000);
-        setStatusMsg(`Running on Apify… ${elapsed}s elapsed.`);
+        setStatusMsg(`Running… ${elapsed}s elapsed.`);
         const p = await pollAiCitationsRunAction({
           runId: res.runId,
           datasetId: res.datasetId,
@@ -189,7 +189,7 @@ export function AiCitationsPanel({
               AI citations
               <span
                 className="inline-flex"
-                title="Single Apify Ahrefs scraper run with include_ai_visibility=true. Returns per-platform citation counts (ChatGPT, Gemini, Perplexity, Copilot, AI Overviews) for your brand keyword. Cached 24h."
+                title="Returns per-platform citation counts across the major AI answer engines for your brand keyword. Cached 24h."
               >
                 <Info className="h-3 w-3 text-muted-foreground" />
               </span>
@@ -208,7 +208,7 @@ export function AiCitationsPanel({
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                One Apify Ahrefs run powers all 6 tiles. Click <b>Run check</b> to fetch.
+                One run powers all 6 tiles. Click <b>Run check</b> to fetch.
               </p>
             )}
           </div>
@@ -247,9 +247,8 @@ export function AiCitationsPanel({
           <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
             No AI citation data yet for <span className="font-medium">{domain}</span>.
             <br />
-            Click <span className="font-medium">Run check</span> to fetch citations from
-            ChatGPT, Gemini, Perplexity, Copilot, and Google AI Overviews in a single
-            Apify call.
+            Click <span className="font-medium">Run check</span> to fetch citations
+            across the major AI answer engines in a single call.
           </p>
         )}
 

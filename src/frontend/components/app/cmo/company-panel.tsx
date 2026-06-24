@@ -151,8 +151,8 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
                 Analyzing {stripUrlScheme(data.workspace.websiteUrl ?? "")}…
               </div>
               <p className="text-muted-foreground">
-                Claude is reading the site, picking competitors + social
-                handles, and Apify is fetching Ahrefs metrics. Usually 30-60s.
+                Reading the site, picking competitors + social
+                handles, and fetching site metrics. Usually 30-60s.
                 The page refreshes automatically when ready.
               </p>
             </div>
@@ -170,8 +170,7 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
                 </div>
                 <p className="text-muted-foreground">
                   Strategy generation usually completes in 30-60s. Reload to
-                  re-run, or check that <code className="font-mono">ANTHROPIC_API_KEY</code>{" "}
-                  has credits.
+                  re-run.
                 </p>
               </div>
               <ReloadButton />

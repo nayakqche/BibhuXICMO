@@ -18,10 +18,10 @@ export default function PrivacyPage() {
 
         <h2 className="mt-10 text-2xl font-semibold">Third parties</h2>
         <p>
-          We use Stripe for payments, Resend for transactional email, and the LLM providers
-          you have selected (OpenAI, Anthropic, Perplexity). External integrations you
-          connect (Google Search Console, GA4, Reddit, X, LinkedIn, GitHub) receive only
-          the scopes you grant.
+          We use Stripe for payments, Resend for transactional email, and third-party
+          AI providers to power agent runs. External integrations you connect
+          (Google Search Console, GA4, Reddit, X, LinkedIn, GitHub) receive only the
+          scopes you grant.
         </p>
 
         <h2 className="mt-10 text-2xl font-semibold">Your rights</h2>

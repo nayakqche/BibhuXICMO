@@ -69,7 +69,7 @@ export function SiteQuickAdd({
         // always re-runs strategy / Ahrefs / PageSpeed after a save.
         await forceReauditAction();
         toast.success("Site saved — refreshing dashboard", {
-          description: "Pulling Ahrefs · Lighthouse · Claude strategy. Takes 30-60s.",
+          description: "Pulling site metrics, performance + AI strategy. Takes 30-60s.",
         });
         setOpen(false);
         // Hard reload — bulletproof against React server-component cache, browser
@@ -166,8 +166,8 @@ export function SiteQuickAdd({
         ) : null}
       </div>
       <p className="text-[10px] leading-tight text-muted-foreground">
-        We&rsquo;ll scrape the homepage, run Lighthouse, fetch Ahrefs
-        (DR, backlinks, traffic), and ask Claude to generate strategy +
+        We&rsquo;ll scrape the homepage, check site performance, fetch
+        SEO metrics (DR, backlinks, traffic), and generate a strategy +
         social handles. First audit takes ~30-60s.
       </p>
     </form>
