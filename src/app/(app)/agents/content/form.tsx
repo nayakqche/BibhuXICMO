@@ -298,20 +298,17 @@ function BulkForm({ geminiAvailable }: { geminiAvailable: boolean }) {
           <div className="flex-1">
             <div className="flex items-center gap-1.5 font-medium text-foreground">
               <ImageIcon className="h-3.5 w-3.5 text-primary" />
-              Generate hero image (Gemini)
+              Generate hero image
             </div>
             <p className="mt-0.5 leading-relaxed text-muted-foreground">
               {geminiAvailable ? (
                 <>
                   Adds a 16:9 hero plus per-item images for listicles (one per item)
-                  or 2-3 section images for descriptive blogs. Generated in
-                  parallel via Gemini — adds ~30-60s per keyword.
+                  or 2-3 section images for descriptive blogs. Adds ~30-60s
+                  per keyword.
                 </>
               ) : (
-                <>
-                  Set <code className="rounded bg-muted px-1">GOOGLE_GEMINI_API_KEY</code> in
-                  Render env vars to enable image generation.
-                </>
+                <>Image generation isn&rsquo;t configured on this workspace.</>
               )}
             </p>
           </div>

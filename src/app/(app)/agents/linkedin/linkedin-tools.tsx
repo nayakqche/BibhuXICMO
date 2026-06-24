@@ -71,9 +71,9 @@ function RunningPanel({ elapsedMs, statusMsg }: { elapsedMs: number; statusMsg?:
       <CardContent className="flex items-center gap-3 py-4 text-sm">
         <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium">Scraping LinkedIn via Apify…</div>
+          <div className="font-medium">Scraping LinkedIn…</div>
           <div className="text-xs text-muted-foreground">
-            {statusMsg ? statusMsg : "Spinning up the actor."}{" "}
+            {statusMsg ? statusMsg : "Spinning up the job."}{" "}
             <span className="tabular-nums">{seconds}s</span> elapsed · usually 30-90s.
           </div>
         </div>
@@ -104,7 +104,7 @@ async function pollUntilDone(
   }
   return {
     ok: false,
-    error: "Apify run didn't finish within 4 minutes. Try again later.",
+    error: "Scrape didn't finish within 4 minutes. Try again later.",
   };
 }
 
@@ -126,16 +126,14 @@ export function LinkedInTools({
         <div>
           <h2 className="text-base font-semibold">LinkedIn intelligence</h2>
           <p className="text-xs text-muted-foreground">
-            Scrape company posts &amp; enrich prospect profiles via Apify — no cookies, no account.
+            Scrape company posts &amp; enrich prospect profiles — no cookies, no account.
           </p>
         </div>
       </div>
       <CardContent className="pt-5">
         {!hasApifyToken && (
           <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-            Add your Apify keys to enable scraping:{" "}
-            <code>APIFY_LINKEDIN_PROFILE_TOKEN</code> (profiles) and{" "}
-            <code>APIFY_LINKEDIN_POSTS_TOKEN</code> (company posts).
+            LinkedIn scraping isn&rsquo;t enabled on this workspace.
           </div>
         )}
         <Tabs defaultValue="company">
@@ -260,7 +258,7 @@ function CompanyInsightsTool({
         );
         setProgress(null);
         if (!final.ok) {
-          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          toast.error("Scrape failed", { description: final.error, duration: 9000 });
           return;
         }
         setData(final.data as LinkedInCompanyPostsResult);
@@ -325,7 +323,7 @@ function CompanyInsightsTool({
         );
         setCommProgress(null);
         if (!final.ok) {
-          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          toast.error("Scrape failed", { description: final.error, duration: 9000 });
           return;
         }
         const d = final.data as LinkedInProfilesResult;
@@ -389,7 +387,7 @@ function CompanyInsightsTool({
         <Toggle
           id="li-reactions"
           label="Scrape reactions"
-          hint="Per-post reaction breakdown (extra Apify cost)"
+          hint="Per-post reaction breakdown (extra cost)"
           checked={scrapeReactions}
           onChange={setScrapeReactions}
           disabled={pending || disabled}
@@ -397,7 +395,7 @@ function CompanyInsightsTool({
         <Toggle
           id="li-comments"
           label="Scrape comments"
-          hint="Top comments per post (extra Apify cost)"
+          hint="Top comments per post (extra cost)"
           checked={scrapeComments}
           onChange={setScrapeComments}
           disabled={pending || disabled}
@@ -626,7 +624,7 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
         );
         setProgress(null);
         if (!final.ok) {
-          toast.error("Apify run failed", { description: final.error, duration: 9000 });
+          toast.error("Scrape failed", { description: final.error, duration: 9000 });
           return;
         }
         const data = final.data as LinkedInProfilesResult;
@@ -663,7 +661,7 @@ function BulkProfileTool({ disabled }: { disabled: boolean }) {
       <Toggle
         id="li-find-email"
         label="Find email addresses"
-        hint="SMTP-validated email lookup (extra Apify cost, not guaranteed). Phone numbers aren't available — LinkedIn never exposes them."
+        hint="SMTP-validated email lookup (extra cost, not guaranteed). Phone numbers aren't available — LinkedIn never exposes them."
         checked={findEmail}
         onChange={setFindEmail}
         disabled={pending || disabled}

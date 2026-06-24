@@ -39,7 +39,7 @@ const TOOLS = [
   {
     slug: "private-chat",
     name: "Private Chat",
-    description: "Multi-model chat workbench — OpenAI, Anthropic, and more in one place.",
+    description: "Multi-model chat workbench in one place.",
     icon: MessageSquare,
   },
 ];

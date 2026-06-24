@@ -78,7 +78,7 @@ export function InstagramRunButtons() {
           );
         toast.error(`${label} failed`, {
           description: isNetworkAbort
-            ? "Server took too long to respond (Render's free tier closes connections after ~100s). The run may have started — check the Runs tab in a minute. If it persists, set ANTHROPIC_API_KEY or OPENAI_API_KEY, or upgrade the web service to Starter."
+            ? "Server took too long to respond. The run may have started — check the Runs tab in a minute. If it persists, contact support."
             : raw || "Unknown error",
         });
       }

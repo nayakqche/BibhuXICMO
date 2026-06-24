@@ -107,7 +107,7 @@ export async function startOnboardingAction(
       ok: true,
       workspaceId: workspace.id,
       note: usedFallback
-        ? "Saved your site, but the LLM did not respond — opened your dashboard with a starter strategy. Configure ANTHROPIC_API_KEY (preferred) or OPENAI_API_KEY and re-run the SEO agent for a deep analysis."
+        ? "Saved your site, but the AI didn't respond — opened your dashboard with a starter strategy. Re-run the SEO agent for a deep analysis."
         : undefined,
     };
   } catch (err) {
@@ -133,7 +133,7 @@ export async function startOnboardingAction(
       ok: true,
       workspaceId: workspace.id,
       note:
-        "Saved your site. We couldn't fully analyze it (the LLM provider returned an error) — open AI CMO and click the homepage card to retry, or check ANTHROPIC_API_KEY / OPENAI_API_KEY.",
+        "Saved your site. We couldn't fully analyze it right now — open AI CMO and click the homepage card to retry.",
     };
   }
 }

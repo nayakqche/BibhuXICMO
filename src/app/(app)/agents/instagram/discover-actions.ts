@@ -110,7 +110,7 @@ export async function startIGSeedDiscoveryAction(
       return {
         ok: false,
         error:
-          "Set APIFY_TOKEN (or APIFY_IG_TOKEN) in Render → Environment to enable creator discovery.",
+          "Creator discovery isn't enabled on this workspace.",
       };
     }
     return {
@@ -161,8 +161,7 @@ export async function startIGKeywordDiscoveryAction(
     if (err instanceof ApifyIGNotConfiguredError) {
       return {
         ok: false,
-        error:
-          "Set APIFY_TOKEN (or APIFY_IG_TOKEN) in Render → Environment.",
+        error: "Discovery isn't enabled on this workspace.",
       };
     }
     return {
@@ -201,7 +200,7 @@ export async function pollIGDiscoveryAction(args: {
     return {
       ok: false,
       status: "UNKNOWN",
-      error: err instanceof Error ? err.message : "Could not reach Apify.",
+      error: err instanceof Error ? err.message : "Could not reach the discovery service.",
     };
   }
 
@@ -220,7 +219,7 @@ export async function pollIGDiscoveryAction(args: {
       status: status.status,
       error:
         status.statusMessage ??
-        `Discovery ${status.status.toLowerCase()} on Apify.`,
+        `Discovery ${status.status.toLowerCase()}.`,
     };
   }
 

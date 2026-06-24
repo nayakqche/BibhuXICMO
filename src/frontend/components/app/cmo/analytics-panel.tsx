@@ -339,12 +339,8 @@ function HealthTab({ data }: { data: CmoData }) {
 
       {!data.pageSpeed && !llm ? (
         <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground">
-          Add an{" "}
-          <code className="rounded bg-muted px-1">OPENAI_API_KEY</code> or{" "}
-          <code className="rounded bg-muted px-1">ANTHROPIC_API_KEY</code> for AI
-          estimates, or{" "}
-          <code className="rounded bg-muted px-1">PAGESPEED_API_KEY</code> for real
-          Lighthouse scores.
+          Configure an AI provider for AI estimates, or a PageSpeed key
+          for real performance scores.
         </div>
       ) : null}
     </div>
@@ -961,7 +957,7 @@ function AhrefsTrafficCard({
           ) : null}
         </div>
         <span className="text-[10px] text-muted-foreground">
-          via Apify · {snapshot.domain}
+          {snapshot.domain}
         </span>
       </div>
 
@@ -1091,7 +1087,7 @@ function AhrefsBacklinksCard({
           ) : null}
         </div>
         <span className="text-[10px] text-muted-foreground">
-          via Apify · {snapshot.domain}
+          {snapshot.domain}
         </span>
       </div>
 

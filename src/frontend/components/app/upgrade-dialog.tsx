@@ -46,7 +46,7 @@ const PLANS: PlanCard[] = [
     features: [
       { ok: true, label: "10,000 credits / month" },
       { ok: true, label: "All free features" },
-      { ok: true, label: "Premium model defaults (GPT-4o, Claude 3.5)" },
+      { ok: true, label: "Premium AI model defaults" },
       { ok: true, label: "Priority agent runs + chat queue" },
       { ok: true, label: "Email digests" },
     ],

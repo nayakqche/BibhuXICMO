@@ -60,7 +60,7 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
           </CardTitle>
           <CardDescription className="mt-1">
             Domain Rating, backlinks, organic traffic and top keywords —
-            sourced live from Apify&rsquo;s Ahrefs scraper.
+            sourced live from your domain.
           </CardDescription>
         </div>
         <Button
@@ -69,7 +69,7 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
           variant="outline"
           onClick={load}
           disabled={isLoading || !hasWebsite}
-          title={hasWebsite ? "Run the Apify Ahrefs actor" : "Add a website URL in Settings"}
+          title={hasWebsite ? "Fetch the latest snapshot" : "Add a website URL in Settings"}
         >
           {isLoading ? (
             <>
@@ -105,33 +105,23 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
           />
         ) : needsConfig ? (
           <EmptyState
-            title="Configure APIFY_TOKEN"
+            title="Data provider not configured"
             body={
               <>
-                Add <code className="rounded bg-muted px-1 py-0.5 text-[11px]">APIFY_TOKEN</code>{" "}
-                to your <code className="rounded bg-muted px-1 py-0.5 text-[11px]">.env</code>{" "}
-                file and restart the dev server. Get a token at{" "}
-                <a
-                  href="https://console.apify.com/settings/integrations"
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="underline"
-                >
-                  console.apify.com
-                </a>
-                .
+                Site metrics need a data provider to be configured on the
+                server. Contact your admin or check the deployment docs.
               </>
             }
           />
         ) : error && !snapshot ? (
-          <EmptyState title="Ahrefs fetch failed" body={error} />
+          <EmptyState title="Fetch failed" body={error} />
         ) : !snapshot ? (
           <EmptyState
             title="No data yet"
             body={
               <>
-                Click <strong>Fetch data</strong> to run the Apify Ahrefs actor
-                against your domain. Typically takes 10–30 seconds.
+                Click <strong>Fetch data</strong> to pull the latest snapshot
+                for your domain. Typically takes 10–30 seconds.
               </>
             }
           />
@@ -177,8 +167,7 @@ function SnapshotView({ snapshot }: { snapshot: Snapshot }) {
         </div>
         {snapshot.topKeywords.length === 0 ? (
           <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
-            The actor didn&rsquo;t return a keyword list. Try a different actor
-            via <code className="text-[11px]">APIFY_AHREFS_ACTOR_ID</code>.
+            No keyword data was returned for this domain.
           </p>
         ) : (
           <div className="overflow-hidden rounded-md border">
@@ -298,7 +287,7 @@ function SnapshotView({ snapshot }: { snapshot: Snapshot }) {
 
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <Link2 className="h-3 w-3" />
-        <span>Source: Apify Ahrefs actor</span>
+        <span>Source: Ahrefs</span>
         <span>·</span>
         <span>{new Date(snapshot.fetchedAt).toLocaleString()}</span>
         <span>·</span>

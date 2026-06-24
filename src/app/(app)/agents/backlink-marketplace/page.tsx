@@ -24,7 +24,7 @@ export default function BacklinkMarketplacePage() {
         },
         {
           title: "Topical-relevance match",
-          body: "Claude reads your site + the publisher's recent posts and ranks each placement by topical fit (so you don't waste budget on irrelevant DR-90 placements).",
+          body: "Our AI reads your site + the publisher's recent posts and ranks each placement by topical fit (so you don't waste budget on irrelevant DR-90 placements).",
           icon: TrendingUp,
         },
         {

@@ -54,7 +54,7 @@ export default async function LinkedInAgentPage() {
   return (
     <GenericAgentPage
       title="LinkedIn Agent"
-      description="Scrape competitor posts and prospect profiles via Apify, then draft brand-voice content and personalized outreach. You publish."
+      description="Scrape competitor posts and prospect profiles, then draft brand-voice content and personalized outreach. You publish."
       icon={LinkedinLogo}
       agentId="linkedin"
       drafts={drafts}
