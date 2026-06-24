@@ -182,20 +182,24 @@ function loadSlow(fast: CmoFastData, workspaceId: string) {
   return p;
 }
 
+/**
+ * Skeleton used by the Analytics Suspense boundary.
+ *
+ * Slow data is cached 24h, so almost every navigation is a cache hit
+ * that resolves in 50-100ms. The previous skeleton bragged about
+ * "typically 30-60s on first run" — which is true on cold starts but
+ * read as "this is reloading from scratch every time" on warm
+ * navigations. Quiet placeholder pulses are more honest: brief flash
+ * on warm navigations, the cold-path copy only appears after a
+ * client-side delay (see SlowAnalyticsHint).
+ */
 function AnalyticsSkeleton() {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-2 pb-3">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            Loading site signals (typically 30–60s on first run)
-          </div>
-          <p className="text-[11px] text-muted-foreground/80">
-            Scraping homepage · checking page performance · fetching SEO metrics · running strategy analysis.
-            Persistent cache (1h) — survives redeploys + cold starts. Hit&nbsp;
-            <span className="font-medium text-foreground/80">Refresh</span>&nbsp;in the Analytics panel for fresh data.
-          </p>
+        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+          Loading analytics…
         </div>
       </CardHeader>
       <CardContent className="space-y-3">

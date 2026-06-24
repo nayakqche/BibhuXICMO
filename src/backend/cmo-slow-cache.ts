@@ -31,8 +31,14 @@ import { prisma } from "@/backend/db";
 import type { PageSnapshot } from "@/backend/scraper/fetch";
 import type { PageSpeedResult } from "@/backend/pagespeed";
 
-/** Default 1h freshness window — long enough that tab-switching never refetches. */
-export const CMO_SLOW_CACHE_MS = 60 * 60 * 1000;
+/**
+ * 24h freshness window. Aligned with the Ahrefs cache and the LLM
+ * snapshot cache so a site analyzed today doesn't re-run the homepage
+ * scrape + PageSpeed + GA4 + GSC pulls on every tab switch. The manual
+ * "Refresh" button in the Analytics panel forces a fresh fetch when
+ * the user actually wants new data.
+ */
+export const CMO_SLOW_CACHE_MS = 24 * 60 * 60 * 1000;
 
 export type CmoSlowGsc = {
   connected: boolean;
