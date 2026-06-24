@@ -26,6 +26,7 @@ import { Button } from "@/frontend/components/ui/button";
 import { SiteQuickAdd } from "@/frontend/components/app/cmo/site-quick-add";
 import { CompetitorPill } from "@/frontend/components/app/cmo/competitor-pill";
 import { AutoRefreshWhenPending } from "@/frontend/components/app/cmo/auto-refresh-when-pending";
+import { AnalysisProgressToast } from "@/frontend/components/app/cmo/analysis-progress-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/frontend/components/ui/card";
 import { forceReauditAction } from "@/app/(app)/settings/actions";
 import type { CmoFastData, CmoSlowData } from "@/backend/agents/cmo-data";
@@ -132,6 +133,13 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
           workspaceName={data.workspace.name}
           currentUrl={data.workspace.websiteUrl}
         />
+
+        {pending && data.workspace.websiteUrl ? (
+          <AnalysisProgressToast
+            url={data.workspace.websiteUrl}
+            durationMs={ANALYSIS_TIMEOUT_MS}
+          />
+        ) : null}
 
         {pending ? (
           <>
