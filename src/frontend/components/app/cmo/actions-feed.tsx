@@ -8,13 +8,18 @@ import {
   Check,
   ChevronDown,
   FileText,
+  Globe,
   Hash,
+  Instagram,
   Lock,
   MessageCircle,
   Newspaper,
+  Search,
   Sparkles,
   Linkedin,
   TrendingUp,
+  Twitter,
+  Youtube,
   X as XIcon,
 } from "lucide-react";
 import { Badge } from "@/frontend/components/ui/badge";
@@ -75,6 +80,129 @@ const GROUP_META: Record<
   linkedin: { label: "LinkedIn writer", icon: Linkedin, cta: "Post", maxOnly: true },
   other: { label: "Other actions", icon: Sparkles, cta: "Open" },
 };
+
+/**
+ * Per-agent visual identity for the action rows. Each agent gets a
+ * dedicated icon + colour so a glance at the feed tells you which agent
+ * raised the action. Colours are tuned to read in both light and dark
+ * themes (soft tinted background + saturated border/text/icon).
+ */
+type AgentVisual = {
+  label: string;
+  icon: typeof Sparkles;
+  /** Tailwind classes for the badge container (bg + border + text). */
+  badge: string;
+  /** Tailwind class for the left accent rail on the row. */
+  rail: string;
+};
+
+const AGENT_VISUALS: Record<string, AgentVisual> = {
+  seo: {
+    label: "SEO",
+    icon: Search,
+    badge:
+      "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
+    rail: "bg-emerald-500",
+  },
+  geo: {
+    label: "GEO",
+    icon: Globe,
+    badge:
+      "bg-violet-500/10 border-violet-500/30 text-violet-600 dark:text-violet-400",
+    rail: "bg-violet-500",
+  },
+  reddit: {
+    label: "Reddit",
+    icon: MessageCircle,
+    badge:
+      "bg-orange-500/10 border-orange-500/30 text-orange-600 dark:text-orange-400",
+    rail: "bg-orange-500",
+  },
+  x: {
+    label: "X",
+    icon: Twitter,
+    badge:
+      "bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400",
+    rail: "bg-sky-500",
+  },
+  twitter: {
+    label: "X",
+    icon: Twitter,
+    badge:
+      "bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400",
+    rail: "bg-sky-500",
+  },
+  linkedin: {
+    label: "LinkedIn",
+    icon: Linkedin,
+    badge:
+      "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400",
+    rail: "bg-blue-500",
+  },
+  content: {
+    label: "Article",
+    icon: FileText,
+    badge:
+      "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400",
+    rail: "bg-amber-500",
+  },
+  hn: {
+    label: "Hacker News",
+    icon: Newspaper,
+    badge:
+      "bg-orange-600/10 border-orange-600/30 text-orange-700 dark:text-orange-400",
+    rail: "bg-orange-600",
+  },
+  hackernews: {
+    label: "Hacker News",
+    icon: Newspaper,
+    badge:
+      "bg-orange-600/10 border-orange-600/30 text-orange-700 dark:text-orange-400",
+    rail: "bg-orange-600",
+  },
+  youtube: {
+    label: "YouTube",
+    icon: Youtube,
+    badge:
+      "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400",
+    rail: "bg-red-500",
+  },
+  instagram: {
+    label: "Instagram",
+    icon: Instagram,
+    badge:
+      "bg-pink-500/10 border-pink-500/30 text-pink-600 dark:text-pink-400",
+    rail: "bg-pink-500",
+  },
+};
+
+const DEFAULT_AGENT_VISUAL: AgentVisual = {
+  label: "Agent",
+  icon: Sparkles,
+  badge:
+    "bg-slate-500/10 border-slate-500/30 text-slate-600 dark:text-slate-400",
+  rail: "bg-slate-400",
+};
+
+function agentVisual(agent: string): AgentVisual {
+  return AGENT_VISUALS[agent.toLowerCase()] ?? DEFAULT_AGENT_VISUAL;
+}
+
+function AgentBadge({ agent }: { agent: string }) {
+  const v = agentVisual(agent);
+  const Icon = v.icon;
+  return (
+    <span
+      className={
+        "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
+        v.badge
+      }
+    >
+      <Icon className="h-2.5 w-2.5" aria-hidden />
+      {v.label}
+    </span>
+  );
+}
 
 export function ActionsFeed({
   items,
@@ -193,15 +321,19 @@ function PlanGate() {
 
 function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
   const [isPending, startTransition] = useTransition();
+  const v = agentVisual(item.agent);
 
   return (
-    <li className="flex items-start gap-3 px-3 py-2.5 text-sm">
+    <li className="relative flex items-start gap-3 py-2.5 pl-4 pr-3 text-sm transition-colors hover:bg-muted/20">
+      {/* Agent-coloured accent rail */}
+      <span
+        className={"absolute inset-y-0 left-0 w-1 " + v.rail}
+        aria-hidden
+      />
       <PriorityDot p={item.priority} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px] capitalize">
-            {item.agent}
-          </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AgentBadge agent={item.agent} />
           <span className="truncate font-medium">{item.title}</span>
         </div>
         {item.summary ? (
