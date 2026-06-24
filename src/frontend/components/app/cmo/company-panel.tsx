@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -42,10 +42,74 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof FileText }> = [
   { id: "strategy", label: "Marketing strategy", icon: Target },
 ];
 
+const ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
+
+/**
+ * Tracks how long the analysis pending state has been visible for the
+ * current website URL. Persists across router.refresh() via sessionStorage
+ * so the elapsed time survives the polling loop. Once we cross
+ * ANALYSIS_TIMEOUT_MS we flip from "loading" to "failed" — keeps the panel
+ * from sitting on a spinner for 5+ minutes when the strategy LLM silently
+ * failed (no credits, network, etc.) and voice never populated.
+ */
+function useAnalysisTimeout(url: string | null, isPending: boolean): boolean {
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!url || !isPending) {
+      setTimedOut(false);
+      // Clear once analysis succeeds so the next URL change starts fresh.
+      if (url) {
+        try {
+          sessionStorage.removeItem(`cmo:analysis-started:${url}`);
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+
+    const key = `cmo:analysis-started:${url}`;
+    let startedAt: number;
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored) {
+        startedAt = Number(stored);
+        if (!Number.isFinite(startedAt)) startedAt = Date.now();
+      } else {
+        startedAt = Date.now();
+        sessionStorage.setItem(key, String(startedAt));
+      }
+    } catch {
+      startedAt = Date.now();
+    }
+
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= ANALYSIS_TIMEOUT_MS) {
+      setTimedOut(true);
+      return;
+    }
+    setTimedOut(false);
+    const t = setTimeout(
+      () => setTimedOut(true),
+      ANALYSIS_TIMEOUT_MS - elapsed
+    );
+    return () => clearTimeout(t);
+  }, [url, isPending]);
+
+  return timedOut;
+}
+
 export function CompanyPanel({ data }: { data: CompanyData }) {
   const [open, setOpen] = useState<Section | null>(null);
   const hasUrl = !!data.workspace.websiteUrl;
-  const pending = hasUrl && isAnalysisPending(data);
+  const rawPending = hasUrl && isAnalysisPending(data);
+  const timedOut = useAnalysisTimeout(data.workspace.websiteUrl, rawPending);
+  // Only show the spinner state while the analysis is still within its
+  // expected budget. After the timeout we stop polling and surface a
+  // "Failed to load — Reload" affordance in each empty section.
+  const pending = rawPending && !timedOut;
+  const analysisFailed = rawPending && timedOut;
 
   const description =
     data.liveSnapshot?.description?.trim() ||
@@ -86,6 +150,25 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
             </div>
           </div>
           </>
+        ) : null}
+
+        {analysisFailed ? (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+            <div className="flex-1 space-y-2">
+              <div>
+                <div className="font-semibold text-foreground">
+                  Analysis is taking longer than expected
+                </div>
+                <p className="text-muted-foreground">
+                  Strategy generation usually completes in 30-60s. Reload to
+                  re-run, or check that <code className="font-mono">ANTHROPIC_API_KEY</code>{" "}
+                  has credits.
+                </p>
+              </div>
+              <ReloadButton />
+            </div>
+          </div>
         ) : null}
 
         <SocialHandlesRow voice={data.voice ?? null} />
