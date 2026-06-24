@@ -5,7 +5,26 @@ import { requireWorkspace } from "@/backend/workspace";
 import { executeAgent } from "@/backend/agents/base";
 import { getAgent } from "@/backend/agents/registry";
 
-const AGENT_TIMEOUT_MS = 110_000;
+/**
+ * Per-agent wall-clock budget. Picked from actual P95 observed on Render:
+ * agents that do a single LLM call sit at 20-40s but spike to 90s when
+ * Claude is under load; agents that also do network scraping (HN /
+ * X / Instagram / SEO with PageSpeed / GEO with multi-provider probes)
+ * routinely cross 60s and need a longer leash. Keeping the budget
+ * generous beats a confusing "timed out" error in the UI when the work
+ * actually would have completed in another 20s.
+ */
+const AGENT_TIMEOUT_MS: Record<string, number> = {
+  hn: 170_000,
+  x: 170_000,
+  instagram: 170_000,
+  seo: 170_000,
+  geo: 170_000,
+  reddit: 170_000,
+  linkedin: 170_000,
+  youtube: 170_000,
+};
+const DEFAULT_AGENT_TIMEOUT_MS = 110_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -13,7 +32,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       () =>
         reject(
           new Error(
-            `${label} timed out after ${Math.round(ms / 1000)}s. Try again or check Render logs.`
+            `${label} is taking longer than ${Math.round(ms / 1000)}s. The LLM is probably slow or rate-limited — try again in a minute, or check Render logs.`
           )
         ),
       ms
@@ -39,9 +58,7 @@ export async function runAgentAction(agentId: string, input?: unknown) {
   try {
     const result = await withTimeout(
       executeAgent(agent, workspace.id, input ?? {}),
-      agentId === "hn" || agentId === "x" || agentId === "instagram"
-        ? 170_000
-        : 60_000,
+      AGENT_TIMEOUT_MS[agentId] ?? DEFAULT_AGENT_TIMEOUT_MS,
       agent.title
     );
     revalidatePath(`/agents/${agentId}`);
