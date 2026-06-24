@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   BarChart3,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  getCachedAhrefsAction,
   refreshAhrefsSnapshotAction,
   type AhrefsActionResult,
 } from "@/app/(app)/agents/seo/ahrefs-actions";
@@ -33,15 +34,49 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [needsConfig, setNeedsConfig] = useState(false);
   const [isLoading, startLoading] = useTransition();
+  const [hydrated, setHydrated] = useState(false);
 
-  function load() {
+  // Hydrate from the cached snapshot on mount. This is a pure DB read —
+  // no Apify call — so we can do it every time the panel mounts without
+  // burning credits. It's what makes switching tabs feel instant after
+  // the first fetch.
+  useEffect(() => {
+    if (!hasWebsite) {
+      setHydrated(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getCachedAhrefsAction();
+        if (cancelled) return;
+        if (res.ok) setSnapshot(res.snapshot);
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasWebsite]);
+
+  // First click on "Fetch data" / "Refresh": cache-first by default so
+  // switching tabs never re-bills. The Refresh button has its own forced
+  // path below.
+  function load(opts: { force?: boolean } = {}) {
     setError(null);
     setNeedsConfig(false);
     startLoading(async () => {
-      const res = await refreshAhrefsSnapshotAction();
+      const res = await refreshAhrefsSnapshotAction({ force: opts.force });
       if (res.ok) {
         setSnapshot(res.snapshot);
-        toast.success("Ahrefs snapshot updated");
+        if (opts.force) toast.success("Snapshot refreshed");
+        else if (res.age === "fresh" && snapshot) {
+          // No-op toast — user clicked Fetch and got cached data; don't
+          // spam them with a success message.
+        } else {
+          toast.success("Snapshot loaded");
+        }
       } else {
         setError(res.error);
         if (res.needsConfig) setNeedsConfig(true);
@@ -67,9 +102,15 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
           type="button"
           size="sm"
           variant="outline"
-          onClick={load}
+          onClick={() => load({ force: !!snapshot })}
           disabled={isLoading || !hasWebsite}
-          title={hasWebsite ? "Fetch the latest snapshot" : "Add a website URL in Settings"}
+          title={
+            hasWebsite
+              ? snapshot
+                ? "Force a fresh fetch (uses a credit)"
+                : "Fetch the latest snapshot (cached for 24h)"
+              : "Add a website URL in Settings"
+          }
         >
           {isLoading ? (
             <>
@@ -103,6 +144,11 @@ export function AhrefsPanel({ hasWebsite }: { hasWebsite: boolean }) {
               </>
             }
           />
+        ) : !hydrated ? (
+          <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            Loading cached snapshot…
+          </div>
         ) : needsConfig ? (
           <EmptyState
             title="Data provider not configured"
