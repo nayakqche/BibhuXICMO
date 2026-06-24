@@ -12,7 +12,7 @@ import { clearCmoSlowCache } from "@/backend/cmo-slow-cache";
  * `Workspace.cmoSlowSnapshot` AND any lingering Next.js route cache —
  * then revalidates the CMO route so the next render fetches fresh
  * data. Useful right after a deploy when the user wants up-to-date
- * PageSpeed scores without waiting for the 1h TTL.
+ * PageSpeed scores without waiting for the 24h TTL.
  */
 export async function refreshCmoSlowDataAction(): Promise<{
   ok: true;
