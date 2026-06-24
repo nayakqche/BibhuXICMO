@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
+  AlertCircle,
   AtSign,
   Building2,
   ChevronDown,
@@ -13,6 +15,7 @@ import {
   Linkedin,
   Loader2,
   Megaphone,
+  RefreshCw,
   Target,
   Twitter,
   Users,
@@ -24,6 +27,7 @@ import { SiteQuickAdd } from "@/frontend/components/app/cmo/site-quick-add";
 import { CompetitorPill } from "@/frontend/components/app/cmo/competitor-pill";
 import { AutoRefreshWhenPending } from "@/frontend/components/app/cmo/auto-refresh-when-pending";
 import { Card, CardContent, CardHeader, CardTitle } from "@/frontend/components/ui/card";
+import { forceReauditAction } from "@/app/(app)/settings/actions";
 import type { CmoFastData, CmoSlowData } from "@/backend/agents/cmo-data";
 
 type CompanyData = CmoFastData &
@@ -40,6 +44,8 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof FileText }> = [
 
 export function CompanyPanel({ data }: { data: CompanyData }) {
   const [open, setOpen] = useState<Section | null>(null);
+  const hasUrl = !!data.workspace.websiteUrl;
+  const pending = hasUrl && isAnalysisPending(data);
 
   const description =
     data.liveSnapshot?.description?.trim() ||
@@ -63,7 +69,7 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
           currentUrl={data.workspace.websiteUrl}
         />
 
-        {data.workspace.websiteUrl && isAnalysisPending(data) ? (
+        {pending ? (
           <>
             <AutoRefreshWhenPending intervalMs={15000} />
             <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
@@ -105,10 +111,11 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
               icon={s.icon}
               label={s.label}
               isReady={sectionHasContent(s.id, data)}
+              isPending={pending && !sectionHasContent(s.id, data)}
               isOpen={open === s.id}
               onToggle={() => setOpen(open === s.id ? null : s.id)}
             >
-              <DocumentBody section={s.id} data={data} />
+              <DocumentBody section={s.id} data={data} pending={pending} hasUrl={hasUrl} />
             </DocumentCard>
           ))}
         </div>
@@ -135,6 +142,7 @@ function DocumentCard({
   label,
   isOpen,
   isReady,
+  isPending,
   onToggle,
   children,
 }: {
@@ -142,6 +150,7 @@ function DocumentCard({
   label: string;
   isOpen: boolean;
   isReady?: boolean;
+  isPending?: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
@@ -155,7 +164,12 @@ function DocumentCard({
       >
         <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
         <span className="flex-1 truncate">{label}</span>
-        {isReady ? (
+        {isPending ? (
+          <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden />
+            Loading
+          </span>
+        ) : isReady ? (
           <span className="inline-flex items-center rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-500">
             new
           </span>
@@ -195,12 +209,64 @@ function sectionHasContent(section: Section, data: CompanyData): boolean {
   }
 }
 
+function SectionLoading({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <Loader2 className="h-3 w-3 animate-spin text-primary" aria-hidden />
+      Loading {label}…
+    </div>
+  );
+}
+
+function ReloadButton() {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-7 gap-1.5 px-2 text-[11px]"
+      disabled={isPending}
+      onClick={() =>
+        startTransition(async () => {
+          await forceReauditAction();
+          router.refresh();
+        })
+      }
+    >
+      {isPending ? (
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+      ) : (
+        <RefreshCw className="h-3 w-3" aria-hidden />
+      )}
+      Reload
+    </Button>
+  );
+}
+
+function SectionFailed({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <AlertCircle className="h-3 w-3 text-amber-500" aria-hidden />
+        Failed to load {label}.
+      </div>
+      <ReloadButton />
+    </div>
+  );
+}
+
 function DocumentBody({
   section,
   data,
+  pending,
+  hasUrl,
 }: {
   section: Section;
   data: CompanyData;
+  pending: boolean;
+  hasUrl: boolean;
 }) {
   const v = data.voice;
   switch (section) {
@@ -211,6 +277,16 @@ function DocumentBody({
         data.workspace.icp;
       const props = v?.valueProps ?? [];
       const enrich = data.llmAnalysis?.documentEnrichment;
+      const hasAny =
+        !!desc || props.length > 0 || !!enrich?.productBlurb || !!data.workspace.industry;
+      if (!hasAny) {
+        if (!hasUrl) return <p>Add your website to generate this section.</p>;
+        return pending ? (
+          <SectionLoading label="product information" />
+        ) : (
+          <SectionFailed label="product information" />
+        );
+      }
       return (
         <div className="space-y-2">
           {data.workspace.industry ? (
@@ -219,7 +295,7 @@ function DocumentBody({
               {data.workspace.industry}
             </p>
           ) : null}
-          {desc ? <p>{desc}</p> : <p>No product description yet.</p>}
+          {desc ? <p>{desc}</p> : null}
           {props.length > 0 ? (
             <ul className="ml-4 list-disc space-y-1">
               {props.slice(0, 6).map((p) => (
@@ -239,17 +315,11 @@ function DocumentBody({
     case "competitors": {
       const enrich = data.llmAnalysis?.documentEnrichment;
       if (!v?.competitors?.length && !enrich?.competitorAngles) {
-        return (
-          <div className="space-y-1.5">
-            <p>No competitors recorded yet.</p>
-            <p className="text-[11px] leading-relaxed">
-              The strategy LLM could not return competitor analysis (most often
-              this means the configured key has no billing credits). Add a
-              working <code className="font-mono">ANTHROPIC_API_KEY</code> or
-              <code className="font-mono"> OPENAI_API_KEY</code> with credits,
-              then re-run the SEO agent.
-            </p>
-          </div>
+        if (!hasUrl) return <p>Add your website to find competitors.</p>;
+        return pending ? (
+          <SectionLoading label="competitor analysis" />
+        ) : (
+          <SectionFailed label="competitor analysis" />
         );
       }
       return (
@@ -275,6 +345,14 @@ function DocumentBody({
       const style = v?.brandVoice?.style ?? v?.styleGuidelines?.join("; ");
       const avoidList = v?.brandVoice?.avoid ?? v?.avoid ?? [];
       const enrich = data.llmAnalysis?.documentEnrichment;
+      if (!tone && !style && avoidList.length === 0 && !enrich?.voiceSummary) {
+        if (!hasUrl) return <p>Add your website to generate this section.</p>;
+        return pending ? (
+          <SectionLoading label="brand voice" />
+        ) : (
+          <SectionFailed label="brand voice" />
+        );
+      }
       return (
         <div className="space-y-2">
           {tone ? (
@@ -303,9 +381,6 @@ function DocumentBody({
               {enrich.voiceSummary}
             </p>
           ) : null}
-          {!tone && !style && avoidList.length === 0 && !enrich?.voiceSummary ? (
-            <p>Brand voice profile not generated yet.</p>
-          ) : null}
         </div>
       );
     }
@@ -313,6 +388,14 @@ function DocumentBody({
       const channels = v?.channels ?? [];
       const clusters = v?.topicClusters ?? [];
       const enrich = data.llmAnalysis?.documentEnrichment;
+      if (channels.length === 0 && clusters.length === 0 && !enrich?.strategySummary) {
+        if (!hasUrl) return <p>Add your website to draft a strategy.</p>;
+        return pending ? (
+          <SectionLoading label="marketing strategy" />
+        ) : (
+          <SectionFailed label="marketing strategy" />
+        );
+      }
       return (
         <div className="space-y-2">
           {channels.length > 0 ? (
@@ -344,9 +427,6 @@ function DocumentBody({
               <span className="font-medium text-foreground">AI playbook:</span>{" "}
               {enrich.strategySummary}
             </p>
-          ) : null}
-          {channels.length === 0 && clusters.length === 0 && !enrich?.strategySummary ? (
-            <p>Run an SEO or onboarding pass to draft a strategy.</p>
           ) : null}
         </div>
       );
