@@ -8,13 +8,12 @@ import {
   Check,
   ChevronDown,
   FileText,
-  Globe,
   Hash,
   Instagram,
   Lock,
   MessageCircle,
   Newspaper,
-  Search,
+  PenTool,
   Sparkles,
   Linkedin,
   TrendingUp,
@@ -22,7 +21,6 @@ import {
   Youtube,
   X as XIcon,
 } from "lucide-react";
-import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import {
   Card,
@@ -82,124 +80,172 @@ const GROUP_META: Record<
 };
 
 /**
- * Per-agent visual identity for the action rows. Each agent gets a
- * dedicated icon + colour so a glance at the feed tells you which agent
- * raised the action. Colours are tuned to read in both light and dark
- * themes (soft tinted background + saturated border/text/icon).
+ * Per-agent visual identity for action rows. Each agent gets a small
+ * gradient "app icon" tile — like iOS / Linear / Notion app marks — so
+ * the feed reads at a glance without leaning on cheap solid-color
+ * badges. Brand-color gradients match each platform's identity (Reddit
+ * orange→red, X charcoal, LinkedIn blue, Instagram fuchsia→pink→orange,
+ * etc.); generative agents (SEO, GEO, Article) use sophisticated
+ * dual-stop gradients in their category color.
  */
-type AgentVisual = {
+type AgentBrand = {
+  /** Human-readable label shown under/next to the tile. */
   label: string;
+  /** Lucide icon component rendered inside the tile (white). */
   icon: typeof Sparkles;
-  /** Tailwind classes for the badge container (bg + border + text). */
-  badge: string;
-  /** Tailwind class for the left accent rail on the row. */
-  rail: string;
+  /** Tile background — bg-gradient-to-br + two stops. */
+  tileBg: string;
+  /** Optional override for the icon color (defaults to text-white). */
+  iconColor?: string;
+  /** Optional accent text color used for the agent label caption. */
+  textAccent: string;
 };
 
-const AGENT_VISUALS: Record<string, AgentVisual> = {
+const AGENT_BRANDS: Record<string, AgentBrand> = {
   seo: {
     label: "SEO",
-    icon: Search,
-    badge:
-      "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
-    rail: "bg-emerald-500",
+    icon: TrendingUp,
+    tileBg: "bg-gradient-to-br from-emerald-400 to-teal-600",
+    textAccent: "text-emerald-600 dark:text-emerald-400",
   },
   geo: {
     label: "GEO",
-    icon: Globe,
-    badge:
-      "bg-violet-500/10 border-violet-500/30 text-violet-600 dark:text-violet-400",
-    rail: "bg-violet-500",
+    icon: Sparkles,
+    tileBg: "bg-gradient-to-br from-violet-500 via-fuchsia-500 to-indigo-600",
+    textAccent: "text-violet-600 dark:text-violet-400",
   },
   reddit: {
     label: "Reddit",
     icon: MessageCircle,
-    badge:
-      "bg-orange-500/10 border-orange-500/30 text-orange-600 dark:text-orange-400",
-    rail: "bg-orange-500",
+    tileBg: "bg-gradient-to-br from-orange-400 to-red-600",
+    textAccent: "text-orange-600 dark:text-orange-400",
   },
   x: {
     label: "X",
     icon: Twitter,
-    badge:
-      "bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400",
-    rail: "bg-sky-500",
+    tileBg: "bg-gradient-to-br from-zinc-800 to-black",
+    textAccent: "text-foreground",
   },
   twitter: {
     label: "X",
     icon: Twitter,
-    badge:
-      "bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400",
-    rail: "bg-sky-500",
+    tileBg: "bg-gradient-to-br from-zinc-800 to-black",
+    textAccent: "text-foreground",
   },
   linkedin: {
     label: "LinkedIn",
     icon: Linkedin,
-    badge:
-      "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400",
-    rail: "bg-blue-500",
+    tileBg: "bg-gradient-to-br from-blue-500 to-blue-700",
+    textAccent: "text-blue-600 dark:text-blue-400",
   },
   content: {
     label: "Article",
-    icon: FileText,
-    badge:
-      "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400",
-    rail: "bg-amber-500",
+    icon: PenTool,
+    tileBg: "bg-gradient-to-br from-amber-400 to-orange-500",
+    textAccent: "text-amber-600 dark:text-amber-400",
   },
   hn: {
     label: "Hacker News",
     icon: Newspaper,
-    badge:
-      "bg-orange-600/10 border-orange-600/30 text-orange-700 dark:text-orange-400",
-    rail: "bg-orange-600",
+    tileBg: "bg-gradient-to-br from-orange-500 to-amber-600",
+    textAccent: "text-orange-600 dark:text-orange-400",
   },
   hackernews: {
     label: "Hacker News",
     icon: Newspaper,
-    badge:
-      "bg-orange-600/10 border-orange-600/30 text-orange-700 dark:text-orange-400",
-    rail: "bg-orange-600",
+    tileBg: "bg-gradient-to-br from-orange-500 to-amber-600",
+    textAccent: "text-orange-600 dark:text-orange-400",
   },
   youtube: {
     label: "YouTube",
     icon: Youtube,
-    badge:
-      "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400",
-    rail: "bg-red-500",
+    tileBg: "bg-gradient-to-br from-red-500 to-rose-600",
+    textAccent: "text-red-600 dark:text-red-400",
   },
   instagram: {
     label: "Instagram",
     icon: Instagram,
-    badge:
-      "bg-pink-500/10 border-pink-500/30 text-pink-600 dark:text-pink-400",
-    rail: "bg-pink-500",
+    tileBg:
+      "bg-gradient-to-br from-amber-400 via-pink-500 to-fuchsia-600",
+    textAccent: "text-pink-600 dark:text-pink-400",
   },
 };
 
-const DEFAULT_AGENT_VISUAL: AgentVisual = {
+const DEFAULT_BRAND: AgentBrand = {
   label: "Agent",
   icon: Sparkles,
-  badge:
-    "bg-slate-500/10 border-slate-500/30 text-slate-600 dark:text-slate-400",
-  rail: "bg-slate-400",
+  tileBg: "bg-gradient-to-br from-slate-400 to-slate-600",
+  textAccent: "text-muted-foreground",
 };
 
-function agentVisual(agent: string): AgentVisual {
-  return AGENT_VISUALS[agent.toLowerCase()] ?? DEFAULT_AGENT_VISUAL;
+function agentBrand(agent: string): AgentBrand {
+  return AGENT_BRANDS[agent.toLowerCase()] ?? DEFAULT_BRAND;
 }
 
-function AgentBadge({ agent }: { agent: string }) {
-  const v = agentVisual(agent);
-  const Icon = v.icon;
+/**
+ * Pick a brand visual for the group header. "seo-geo" gets a special
+ * dual-stop violet→emerald gradient that mixes both categories; others
+ * fall back to the most representative single-agent brand.
+ */
+function groupBrand(group: GroupId): AgentBrand {
+  if (group === "seo-geo") {
+    return {
+      label: "SEO & GEO",
+      icon: TrendingUp,
+      tileBg: "bg-gradient-to-br from-emerald-500 via-teal-500 to-violet-600",
+      textAccent: "text-primary",
+    };
+  }
+  if (group === "articles") return agentBrand("content");
+  if (group === "other") return DEFAULT_BRAND;
+  return agentBrand(group);
+}
+
+function GroupTile({ groupId }: { groupId: GroupId }) {
+  const b = groupBrand(groupId);
+  const Icon = b.icon;
   return (
     <span
       className={
-        "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
-        v.badge
+        "relative flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] shadow-sm ring-1 ring-inset ring-white/20 dark:ring-white/10 " +
+        b.tileBg
       }
+      aria-hidden
     >
-      <Icon className="h-2.5 w-2.5" aria-hidden />
-      {v.label}
+      <Icon className="h-3.5 w-3.5 text-white drop-shadow-sm" />
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-[8px] bg-gradient-to-b from-white/15 to-transparent" />
+    </span>
+  );
+}
+
+/**
+ * Square gradient "app icon" tile. Inner ring + soft shadow give it
+ * the same physical-light feel as iOS / Linear / Notion app marks.
+ */
+function AgentTile({
+  agent,
+  size = "md",
+}: {
+  agent: string;
+  size?: "sm" | "md";
+}) {
+  const b = agentBrand(agent);
+  const Icon = b.icon;
+  const tileSize = size === "sm" ? "h-6 w-6" : "h-8 w-8";
+  const iconSize = size === "sm" ? "h-3 w-3" : "h-4 w-4";
+  return (
+    <span
+      className={
+        "relative flex shrink-0 items-center justify-center rounded-[8px] shadow-sm ring-1 ring-inset ring-white/20 dark:ring-white/10 " +
+        tileSize +
+        " " +
+        b.tileBg
+      }
+      aria-hidden
+    >
+      <Icon className={`${iconSize} ${b.iconColor ?? "text-white"} drop-shadow-sm`} />
+      {/* Subtle top gloss for the app-icon feel */}
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-[8px] bg-gradient-to-b from-white/15 to-transparent" />
     </span>
   );
 }
@@ -261,18 +307,21 @@ export function ActionsFeed({
             const locked = !!meta.maxOnly && plan === "FREE";
             const isOpen = open[g];
             return (
-              <div key={g} className="rounded-lg border bg-card/50">
+              <div
+                key={g}
+                className="overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-sm transition-shadow hover:shadow-md"
+              >
                 <button
                   type="button"
                   onClick={() => setOpen((p) => ({ ...p, [g]: !p[g] }))}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/30"
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-muted/20"
                   aria-expanded={isOpen}
                 >
-                  <meta.icon className="h-3.5 w-3.5 text-primary" aria-hidden />
-                  <span className="font-medium">{meta.label}</span>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {list.length} ready
-                  </Badge>
+                  <GroupTile groupId={g} />
+                  <span className="font-semibold tracking-tight">{meta.label}</span>
+                  <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {list.length}
+                  </span>
                   <ChevronDown
                     className={
                       "ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform " +
@@ -321,23 +370,28 @@ function PlanGate() {
 
 function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
   const [isPending, startTransition] = useTransition();
-  const v = agentVisual(item.agent);
+  const brand = agentBrand(item.agent);
 
   return (
-    <li className="relative flex items-start gap-3 py-2.5 pl-4 pr-3 text-sm transition-colors hover:bg-muted/20">
-      {/* Agent-coloured accent rail */}
-      <span
-        className={"absolute inset-y-0 left-0 w-1 " + v.rail}
-        aria-hidden
-      />
-      <PriorityDot p={item.priority} />
+    <li className="group flex items-start gap-3 px-3 py-3 text-sm transition-colors hover:bg-muted/30">
+      <AgentTile agent={item.agent} />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <AgentBadge agent={item.agent} />
-          <span className="truncate font-medium">{item.title}</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${brand.textAccent}`}
+          >
+            {brand.label}
+          </span>
+          <span className="text-muted-foreground/40">·</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <PriorityLabel p={item.priority} />
+          </span>
+        </div>
+        <div className="mt-0.5 truncate font-medium leading-snug text-foreground">
+          {item.title}
         </div>
         {item.summary ? (
-          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
             {item.summary}
           </p>
         ) : null}
@@ -386,22 +440,24 @@ function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
   );
 }
 
-function PriorityDot({ p }: { p: string }) {
+function PriorityLabel({ p }: { p: string }) {
+  const label =
+    p === "URGENT" || p === "HIGH"
+      ? "High priority"
+      : p === "MEDIUM"
+        ? "Medium priority"
+        : "Low priority";
   const color =
     p === "URGENT"
-      ? "bg-red-500"
+      ? "text-red-500"
       : p === "HIGH"
-        ? "bg-orange-500"
+        ? "text-orange-500"
         : p === "MEDIUM"
-          ? "bg-amber-500"
-          : "bg-slate-400";
-  return (
-    <span
-      className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${color}`}
-      aria-hidden
-    />
-  );
+          ? "text-amber-500"
+          : "text-muted-foreground";
+  return <span className={color}>{label}</span>;
 }
+
 
 function groupKey(agent: string): GroupId {
   const a = agent.toLowerCase();
