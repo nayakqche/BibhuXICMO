@@ -77,10 +77,9 @@ export async function updateWorkspaceAction(
       prisma.siteAudit
         .deleteMany({ where: { workspaceId: workspace.id } })
         .catch(() => undefined),
+      // Deleting Keyword cascades to its RankingSnapshot rows
+      // (onDelete: Cascade), so no separate rankingSnapshot delete.
       prisma.keyword
-        .deleteMany({ where: { workspaceId: workspace.id } })
-        .catch(() => undefined),
-      prisma.rankingSnapshot
         .deleteMany({ where: { workspaceId: workspace.id } })
         .catch(() => undefined),
       prisma.seoToolRun
