@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
   AtSign,
   Building2,
   ChevronDown,
@@ -21,12 +20,9 @@ import {
   Users,
   Youtube,
 } from "lucide-react";
-import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import { SiteQuickAdd } from "@/frontend/components/app/cmo/site-quick-add";
 import { CompetitorPill } from "@/frontend/components/app/cmo/competitor-pill";
-import { AutoRefreshWhenPending } from "@/frontend/components/app/cmo/auto-refresh-when-pending";
-import { AnalysisProgressToast } from "@/frontend/components/app/cmo/analysis-progress-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/frontend/components/ui/card";
 import { forceReauditAction } from "@/app/(app)/settings/actions";
 import type { CmoFastData, CmoSlowData } from "@/backend/agents/cmo-data";
@@ -43,79 +39,23 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof FileText }> = [
   { id: "strategy", label: "Marketing strategy", icon: Target },
 ];
 
-// 4-minute budget. On a brand-new site the homepage scrape + PageSpeed
-// + strategy LLM call routinely takes 2-3 min when the LLM is under
-// load. Keep the loading state for the whole window before suggesting
-// retry — a calm spinner reads better than a "failed" banner that fires
-// before the work actually completes.
-const ANALYSIS_TIMEOUT_MS = 4 * 60 * 1000;
-
 /**
- * Tracks how long the analysis pending state has been visible for the
- * current website URL. Persists across router.refresh() via sessionStorage
- * so the elapsed time survives the polling loop. Once we cross
- * ANALYSIS_TIMEOUT_MS we flip from "loading" to "failed" — keeps the panel
- * from sitting on a spinner for 5+ minutes when the strategy LLM silently
- * failed (no credits, network, etc.) and voice never populated.
+ * `analyzing` is supplied by the page, NOT inferred from whether `voice`
+ * happens to be populated. It is true only while the slow analysis phase
+ * is still in flight (the Suspense fallback). Once the slow phase resolves
+ * React swaps in the real panel with `analyzing={false}` — even if the
+ * strategy LLM came back thin, so the panel can never get stuck polling a
+ * voice profile that will never fill.
  */
-function useAnalysisTimeout(url: string | null, isPending: boolean): boolean {
-  const [timedOut, setTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (!url || !isPending) {
-      setTimedOut(false);
-      // Clear once analysis succeeds so the next URL change starts fresh.
-      if (url) {
-        try {
-          sessionStorage.removeItem(`cmo:analysis-started:${url}`);
-        } catch {
-          // ignore
-        }
-      }
-      return;
-    }
-
-    const key = `cmo:analysis-started:${url}`;
-    let startedAt: number;
-    try {
-      const stored = sessionStorage.getItem(key);
-      if (stored) {
-        startedAt = Number(stored);
-        if (!Number.isFinite(startedAt)) startedAt = Date.now();
-      } else {
-        startedAt = Date.now();
-        sessionStorage.setItem(key, String(startedAt));
-      }
-    } catch {
-      startedAt = Date.now();
-    }
-
-    const elapsed = Date.now() - startedAt;
-    if (elapsed >= ANALYSIS_TIMEOUT_MS) {
-      setTimedOut(true);
-      return;
-    }
-    setTimedOut(false);
-    const t = setTimeout(
-      () => setTimedOut(true),
-      ANALYSIS_TIMEOUT_MS - elapsed
-    );
-    return () => clearTimeout(t);
-  }, [url, isPending]);
-
-  return timedOut;
-}
-
-export function CompanyPanel({ data }: { data: CompanyData }) {
+export function CompanyPanel({
+  data,
+  analyzing = false,
+}: {
+  data: CompanyData;
+  analyzing?: boolean;
+}) {
   const [open, setOpen] = useState<Section | null>(null);
   const hasUrl = !!data.workspace.websiteUrl;
-  const rawPending = hasUrl && isAnalysisPending(data);
-  const timedOut = useAnalysisTimeout(data.workspace.websiteUrl, rawPending);
-  // Only show the spinner state while the analysis is still within its
-  // expected budget. After the timeout we stop polling and surface a
-  // "Failed to load — Reload" affordance in each empty section.
-  const pending = rawPending && !timedOut;
-  const analysisFailed = rawPending && timedOut;
 
   const description =
     data.liveSnapshot?.description?.trim() ||
@@ -139,47 +79,21 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
           currentUrl={data.workspace.websiteUrl}
         />
 
-        {pending && data.workspace.websiteUrl ? (
-          <AnalysisProgressToast
-            url={data.workspace.websiteUrl}
-            durationMs={ANALYSIS_TIMEOUT_MS}
-          />
-        ) : null}
-
-        {pending ? (
-          <>
-            <AutoRefreshWhenPending intervalMs={15000} />
-            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
-            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+        {analyzing ? (
+          <div className="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs">
+            <span className="relative mt-0.5 flex h-4 w-4 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/40" />
+              <Loader2 className="relative h-4 w-4 animate-spin text-primary" />
+            </span>
             <div className="space-y-0.5">
               <div className="font-semibold text-foreground">
                 Analyzing {stripUrlScheme(data.workspace.websiteUrl ?? "")}…
               </div>
               <p className="text-muted-foreground">
-                Reading the site, picking competitors + social
-                handles, and fetching site metrics. Usually 30-60s.
-                The page refreshes automatically when ready.
+                Reading the site, picking competitors + social handles, and
+                fetching metrics. This usually takes 30-60s and updates here
+                automatically.
               </p>
-            </div>
-          </div>
-          </>
-        ) : null}
-
-        {analysisFailed ? (
-          <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
-            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-            <div className="flex-1 space-y-2">
-              <div>
-                <div className="font-semibold text-foreground">
-                  Still working on the deep analysis
-                </div>
-                <p className="text-muted-foreground">
-                  The site is loaded — the AI is still drafting your strategy
-                  in the background. You can keep using the app, or reload to
-                  re-run.
-                </p>
-              </div>
-              <ReloadButton />
             </div>
           </div>
         ) : null}
@@ -207,11 +121,16 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
               icon={s.icon}
               label={s.label}
               isReady={sectionHasContent(s.id, data)}
-              isPending={pending && !sectionHasContent(s.id, data)}
+              isPending={analyzing && !sectionHasContent(s.id, data)}
               isOpen={open === s.id}
               onToggle={() => setOpen(open === s.id ? null : s.id)}
             >
-              <DocumentBody section={s.id} data={data} pending={pending} hasUrl={hasUrl} />
+              <DocumentBody
+                section={s.id}
+                data={data}
+                analyzing={analyzing}
+                hasUrl={hasUrl}
+              />
             </DocumentCard>
           ))}
         </div>
@@ -305,11 +224,13 @@ function sectionHasContent(section: Section, data: CompanyData): boolean {
   }
 }
 
-function SectionLoading({ label }: { label: string }) {
+/** Shimmer placeholder bars shown while the analysis is still streaming. */
+function SectionLoading() {
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-      <Loader2 className="h-3 w-3 animate-spin text-primary" aria-hidden />
-      Loading {label}…
+    <div className="space-y-2" aria-hidden>
+      <div className="h-2.5 w-3/4 animate-pulse rounded bg-muted" />
+      <div className="h-2.5 w-full animate-pulse rounded bg-muted [animation-delay:120ms]" />
+      <div className="h-2.5 w-2/3 animate-pulse rounded bg-muted [animation-delay:240ms]" />
     </div>
   );
 }
@@ -341,27 +262,43 @@ function ReloadButton() {
   );
 }
 
-function SectionFailed({ label }: { label: string }) {
+/**
+ * Clean terminal state for a section that has no content and isn't
+ * actively analyzing — e.g. the strategy LLM came back thin. No alarming
+ * "failed" colour; just a quiet line plus a re-run affordance so the user
+ * has a way forward instead of a stuck spinner.
+ */
+function SectionEmpty({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-        <AlertCircle className="h-3 w-3 text-amber-500" aria-hidden />
-        Failed to load {label}.
-      </div>
+      <p className="text-[11px] text-muted-foreground">
+        No {label} generated yet.
+      </p>
       <ReloadButton />
     </div>
   );
 }
 
+/** Renders SectionLoading while analyzing, otherwise the clean empty state. */
+function SectionPlaceholder({
+  analyzing,
+  label,
+}: {
+  analyzing: boolean;
+  label: string;
+}) {
+  return analyzing ? <SectionLoading /> : <SectionEmpty label={label} />;
+}
+
 function DocumentBody({
   section,
   data,
-  pending,
+  analyzing,
   hasUrl,
 }: {
   section: Section;
   data: CompanyData;
-  pending: boolean;
+  analyzing: boolean;
   hasUrl: boolean;
 }) {
   const v = data.voice;
@@ -377,11 +314,7 @@ function DocumentBody({
         !!desc || props.length > 0 || !!enrich?.productBlurb || !!data.workspace.industry;
       if (!hasAny) {
         if (!hasUrl) return <p>Add your website to generate this section.</p>;
-        return pending ? (
-          <SectionLoading label="product information" />
-        ) : (
-          <SectionFailed label="product information" />
-        );
+        return <SectionPlaceholder analyzing={analyzing} label="product information" />;
       }
       return (
         <div className="space-y-2">
@@ -412,11 +345,7 @@ function DocumentBody({
       const enrich = data.llmAnalysis?.documentEnrichment;
       if (!v?.competitors?.length && !enrich?.competitorAngles) {
         if (!hasUrl) return <p>Add your website to find competitors.</p>;
-        return pending ? (
-          <SectionLoading label="competitor analysis" />
-        ) : (
-          <SectionFailed label="competitor analysis" />
-        );
+        return <SectionPlaceholder analyzing={analyzing} label="competitor analysis" />;
       }
       return (
         <div className="space-y-2">
@@ -443,11 +372,7 @@ function DocumentBody({
       const enrich = data.llmAnalysis?.documentEnrichment;
       if (!tone && !style && avoidList.length === 0 && !enrich?.voiceSummary) {
         if (!hasUrl) return <p>Add your website to generate this section.</p>;
-        return pending ? (
-          <SectionLoading label="brand voice" />
-        ) : (
-          <SectionFailed label="brand voice" />
-        );
+        return <SectionPlaceholder analyzing={analyzing} label="brand voice" />;
       }
       return (
         <div className="space-y-2">
@@ -486,11 +411,7 @@ function DocumentBody({
       const enrich = data.llmAnalysis?.documentEnrichment;
       if (channels.length === 0 && clusters.length === 0 && !enrich?.strategySummary) {
         if (!hasUrl) return <p>Add your website to draft a strategy.</p>;
-        return pending ? (
-          <SectionLoading label="marketing strategy" />
-        ) : (
-          <SectionFailed label="marketing strategy" />
-        );
+        return <SectionPlaceholder analyzing={analyzing} label="marketing strategy" />;
       }
       return (
         <div className="space-y-2">
@@ -630,7 +551,17 @@ function stripAt(v: string): string {
   return v.startsWith("@") ? v.slice(1) : v;
 }
 
-function isAnalysisPending(data: CompanyData): boolean {
+/**
+ * True when a website is set but none of the LLM-generated artifacts
+ * (positioning, competitors, social handles) have landed yet. The page
+ * uses this on the FAST data to decide whether the Suspense fallback
+ * should show the "analyzing" state while the slow phase streams in.
+ */
+export function companyAnalysisEmpty(data: {
+  workspace: { websiteUrl: string | null };
+  voice: CmoFastData["voice"];
+}): boolean {
+  if (!data.workspace.websiteUrl) return false;
   const v = data.voice;
   const hasPositioning = !!v?.positioning?.trim();
   const hasCompetitors = (v?.competitors?.length ?? 0) > 0;
@@ -639,8 +570,6 @@ function isAnalysisPending(data: CompanyData): boolean {
     Object.values(v.socialHandles).some(
       (h) => typeof h === "string" && h.trim().length > 0
     );
-  // Pending if we have a URL but none of the LLM-generated artifacts have
-  // landed yet.
   return !hasPositioning && !hasCompetitors && !hasHandles;
 }
 
