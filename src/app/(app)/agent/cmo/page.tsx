@@ -15,7 +15,10 @@ import {
   TerminalPanel,
   type TerminalLine,
 } from "@/frontend/components/app/cmo/terminal-panel";
-import { CompanyPanel } from "@/frontend/components/app/cmo/company-panel";
+import {
+  CompanyPanel,
+  companyAnalysisEmpty,
+} from "@/frontend/components/app/cmo/company-panel";
 import { AnalyticsPanel } from "@/frontend/components/app/cmo/analytics-panel";
 import { ActionsFeed } from "@/frontend/components/app/cmo/actions-feed";
 import { ChatDock } from "@/frontend/components/app/cmo/chat-dock";
@@ -76,7 +79,18 @@ export default async function CmoAgentPage() {
       */}
       <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-4">
         <div>
-          <Suspense fallback={<CompanyPanel data={fast} />}>
+          {/*
+            The fallback shows the "analyzing" state only when the workspace
+            has a URL but no strategy artifacts yet (fresh site). Once the
+            slow phase resolves, CompanyPanelWithLive renders with
+            analyzing=false — so a thin LLM result lands on a clean empty
+            state instead of an endless spinner.
+          */}
+          <Suspense
+            fallback={
+              <CompanyPanel data={fast} analyzing={companyAnalysisEmpty(fast)} />
+            }
+          >
             <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
