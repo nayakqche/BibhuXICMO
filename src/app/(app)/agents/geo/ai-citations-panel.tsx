@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Image from "next/image";
 import { Info, Loader2, Play, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
@@ -50,9 +51,53 @@ function deltaClass(n: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Brand icons (inline SVGs — no extra deps).
+// Brand logos. We load each provider's real favicon (full-colour brand
+// mark) and fall back to a hand-drawn inline SVG only if the image fails
+// to load. Same approach the competitor pills use, so it's consistent and
+// needs no bundled assets.
 // ---------------------------------------------------------------------------
+
+/** Provider homepage whose favicon is the real brand logo. */
+const PLATFORM_LOGO_DOMAIN: Record<PlatformKey, string> = {
+  aiOverviews: "google.com",
+  chatgpt: "openai.com",
+  gemini: "gemini.google.com",
+  perplexity: "perplexity.ai",
+  copilot: "copilot.microsoft.com",
+  grok: "grok.com",
+};
+
 function PlatformIcon({ k, className }: { k: PlatformKey; className?: string }) {
+  const cls = cn("h-5 w-5", className);
+  const [step, setStep] = useState(0);
+  const domain = PLATFORM_LOGO_DOMAIN[k];
+
+  // step 0: Google favicon service · step 1: DuckDuckGo · step 2: inline SVG
+  if (step < 2 && domain) {
+    const src =
+      step === 0
+        ? `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(domain)}`
+        : `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`;
+    return (
+      <span className={cn("relative inline-block overflow-hidden rounded-[4px]", cls)}>
+        <Image
+          src={src}
+          alt={`${k} logo`}
+          fill
+          unoptimized
+          sizes="32px"
+          className="object-contain"
+          onError={() => setStep((s) => s + 1)}
+        />
+      </span>
+    );
+  }
+
+  return <PlatformIconFallback k={k} className={className} />;
+}
+
+/** Hand-drawn brand marks — only shown if the favicon fails to load. */
+function PlatformIconFallback({ k, className }: { k: PlatformKey; className?: string }) {
   const cls = cn("h-5 w-5", className);
   switch (k) {
     case "aiOverviews":
