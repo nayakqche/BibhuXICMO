@@ -43,7 +43,12 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof FileText }> = [
   { id: "strategy", label: "Marketing strategy", icon: Target },
 ];
 
-const ANALYSIS_TIMEOUT_MS = 2 * 60 * 1000;
+// 4-minute budget. On a brand-new site the homepage scrape + PageSpeed
+// + strategy LLM call routinely takes 2-3 min when the LLM is under
+// load. Keep the loading state for the whole window before suggesting
+// retry — a calm spinner reads better than a "failed" banner that fires
+// before the work actually completes.
+const ANALYSIS_TIMEOUT_MS = 4 * 60 * 1000;
 
 /**
  * Tracks how long the analysis pending state has been visible for the
@@ -161,15 +166,16 @@ export function CompanyPanel({ data }: { data: CompanyData }) {
         ) : null}
 
         {analysisFailed ? (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
+            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <div className="flex-1 space-y-2">
               <div>
                 <div className="font-semibold text-foreground">
-                  Analysis is taking longer than expected
+                  Still working on the deep analysis
                 </div>
                 <p className="text-muted-foreground">
-                  Strategy generation usually completes in 30-60s. Reload to
+                  The site is loaded — the AI is still drafting your strategy
+                  in the background. You can keep using the app, or reload to
                   re-run.
                 </p>
               </div>
