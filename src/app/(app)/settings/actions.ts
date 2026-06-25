@@ -67,6 +67,44 @@ export async function updateWorkspaceAction(
     revalidateTag(CMO_SLOW_TAG);
     await clearCmoSlowCache(workspace.id);
 
+    // Wipe every per-agent record tied to the old site so SEO / GEO /
+    // Keywords / Citations pages don't show stale data after a switch.
+    // Workspace-scoped records cascade-delete via Prisma relations on
+    // workspace deletion, but for a URL change we delete in-place. We
+    // intentionally keep AgentRun history (audit trail of past activity)
+    // and ChatSession messages.
+    await Promise.all([
+      prisma.siteAudit
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.keyword
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.rankingSnapshot
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.seoToolRun
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.aiCitationSnapshot
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.geoQuery
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      prisma.geoScoreSnapshot
+        .deleteMany({ where: { workspaceId: workspace.id } })
+        .catch(() => undefined),
+      // Open action items refer to specific pages / titles on the old site
+      // ("fix alt tag on cleanmax.com/about"); they make no sense after a
+      // site switch. Resolved items stay as history.
+      prisma.actionItem
+        .deleteMany({
+          where: { workspaceId: workspace.id, status: "OPEN" },
+        })
+        .catch(() => undefined),
+    ]);
+
     const { invalidateStaleHNDrafts } = await import("@/backend/agents/hn-stale");
     const { invalidateStaleXDrafts } = await import("@/backend/agents/x-stale");
     const { invalidateStaleIGDrafts } = await import(
@@ -82,8 +120,16 @@ export async function updateWorkspaceAction(
   revalidatePath("/settings");
   revalidatePath("/dashboard");
   revalidatePath("/agent/cmo");
+  revalidatePath("/actions");
+  revalidatePath("/agents/seo");
+  revalidatePath("/agents/geo");
   revalidatePath("/agents/hn");
   revalidatePath("/agents/x");
+  revalidatePath("/agents/linkedin");
+  revalidatePath("/agents/instagram");
+  revalidatePath("/agents/youtube");
+  revalidatePath("/agents/reddit");
+  revalidatePath("/agents/backlink-marketplace");
   revalidatePath("/content");
   revalidatePath("/queue");
   return { ok: true as const, resetStrategy: urlChanged };
