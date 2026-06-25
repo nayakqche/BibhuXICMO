@@ -551,27 +551,6 @@ function stripAt(v: string): string {
   return v.startsWith("@") ? v.slice(1) : v;
 }
 
-/**
- * True when a website is set but none of the LLM-generated artifacts
- * (positioning, competitors, social handles) have landed yet. The page
- * uses this on the FAST data to decide whether the Suspense fallback
- * should show the "analyzing" state while the slow phase streams in.
- */
-export function companyAnalysisEmpty(data: {
-  workspace: { websiteUrl: string | null };
-  voice: CmoFastData["voice"];
-}): boolean {
-  if (!data.workspace.websiteUrl) return false;
-  const v = data.voice;
-  const hasPositioning = !!v?.positioning?.trim();
-  const hasCompetitors = (v?.competitors?.length ?? 0) > 0;
-  const hasHandles =
-    !!v?.socialHandles &&
-    Object.values(v.socialHandles).some(
-      (h) => typeof h === "string" && h.trim().length > 0
-    );
-  return !hasPositioning && !hasCompetitors && !hasHandles;
-}
 
 function stripUrlScheme(u: string): string {
   return u.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
