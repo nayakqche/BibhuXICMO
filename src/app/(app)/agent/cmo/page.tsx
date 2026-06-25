@@ -15,10 +15,7 @@ import {
   TerminalPanel,
   type TerminalLine,
 } from "@/frontend/components/app/cmo/terminal-panel";
-import {
-  CompanyPanel,
-  companyAnalysisEmpty,
-} from "@/frontend/components/app/cmo/company-panel";
+import { CompanyPanel } from "@/frontend/components/app/cmo/company-panel";
 import { AnalyticsPanel } from "@/frontend/components/app/cmo/analytics-panel";
 import { ActionsFeed } from "@/frontend/components/app/cmo/actions-feed";
 import { ChatDock } from "@/frontend/components/app/cmo/chat-dock";
@@ -59,6 +56,7 @@ export default async function CmoAgentPage() {
   const llmConfigured = pickAvailableModel() != null;
   const hasRunsToday = fast.recentRuns.some((r) => isToday(r.startedAt));
   const terminalLines = buildTerminalLines(fast);
+  const companyAnalyzing = isCompanyAnalysisEmpty(fast);
 
   return (
     <div className="flex flex-col gap-6">
@@ -87,9 +85,7 @@ export default async function CmoAgentPage() {
             state instead of an endless spinner.
           */}
           <Suspense
-            fallback={
-              <CompanyPanel data={fast} analyzing={companyAnalysisEmpty(fast)} />
-            }
+            fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
           >
             <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
           </Suspense>
@@ -232,6 +228,26 @@ function AnalyticsSkeleton() {
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * True when a workspace has a URL but none of the LLM-generated artifacts
+ * (positioning, competitors, social handles) have landed yet. Lives in the
+ * page (server) module rather than inside the "use client" CompanyPanel so
+ * it can be called from this server render — exporting it from a client
+ * module would turn it into a Client Reference and crash SSR.
+ */
+function isCompanyAnalysisEmpty(data: CmoFastData): boolean {
+  if (!data.workspace.websiteUrl) return false;
+  const v = data.voice;
+  const hasPositioning = !!v?.positioning?.trim();
+  const hasCompetitors = (v?.competitors?.length ?? 0) > 0;
+  const hasHandles =
+    !!v?.socialHandles &&
+    Object.values(v.socialHandles).some(
+      (h) => typeof h === "string" && h.trim().length > 0
+    );
+  return !hasPositioning && !hasCompetitors && !hasHandles;
 }
 
 function buildTerminalLines(data: CmoFastData): TerminalLine[] {
