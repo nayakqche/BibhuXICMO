@@ -57,13 +57,18 @@ function deltaClass(n: number | null): string {
 // needs no bundled assets.
 // ---------------------------------------------------------------------------
 
-/** Provider homepage whose favicon is the real brand logo. */
+/**
+ * Provider homepage whose favicon is the real brand logo. Empty string
+ * means "skip the favicon chain and go straight to the inline SVG" —
+ * used for providers whose favicon is a generic globe (so onError never
+ * fires because the favicon service returns HTTP 200 with that globe).
+ */
 const PLATFORM_LOGO_DOMAIN: Record<PlatformKey, string> = {
   aiOverviews: "google.com",
   chatgpt: "openai.com",
   gemini: "gemini.google.com",
   perplexity: "perplexity.ai",
-  copilot: "copilot.microsoft.com",
+  copilot: "", // Microsoft's copilot.microsoft.com favicon is a generic globe.
   grok: "grok.com",
 };
 
@@ -121,9 +126,39 @@ function PlatformIconFallback({ k, className }: { k: PlatformKey; className?: st
         </svg>
       );
     case "copilot":
+      // Stylised Copilot ribbon — flowing S-curve stroke with the official
+      // Microsoft Copilot brand gradient (blue → green → magenta → orange).
+      // gradientUnits=userSpaceOnUse keeps the gradient stable when the icon
+      // is scaled by Tailwind size classes.
       return (
-        <svg viewBox="0 0 24 24" fill="currentColor" className={cn(cls, "text-amber-400")}>
-          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm-2 14H6a4 4 0 1 1 0-8h2v8Zm6 0h-4V8h4a4 4 0 0 1 0 8Z" />
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          className={cls}
+          aria-hidden
+        >
+          <defs>
+            <linearGradient
+              id="copilot-grad"
+              x1="2"
+              y1="4"
+              x2="22"
+              y2="20"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="#1B88FF" />
+              <stop offset="33%" stopColor="#2DC56E" />
+              <stop offset="66%" stopColor="#E66A8C" />
+              <stop offset="100%" stopColor="#FF8534" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M7.2 5.4C5 5.4 3.4 7 3.4 9.2c0 2.2 1.6 3.8 3.8 3.8h2.2c1 0 1.7.7 1.7 1.7s-.7 1.7-1.7 1.7H7.2c-2.2 0-3.8 1.6-3.8 3.8M16.8 18.6c2.2 0 3.8-1.6 3.8-3.8 0-2.2-1.6-3.8-3.8-3.8h-2.2c-1 0-1.7-.7-1.7-1.7s.7-1.7 1.7-1.7h2.2c2.2 0 3.8-1.6 3.8-3.8"
+            stroke="url(#copilot-grad)"
+            strokeWidth="2.3"
+            strokeLinecap="round"
+            fill="none"
+          />
         </svg>
       );
     case "grok":
