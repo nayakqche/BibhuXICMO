@@ -19,8 +19,12 @@ export function XComposer() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="space-y-1">
         <CardTitle>New draft</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          For posts in your voice, add your persona above — paste it or upload
+          a PDF, DOC, CSV, XLSX, PNG, JPG or MP4.
+        </p>
       </CardHeader>
       <CardContent>
         <form

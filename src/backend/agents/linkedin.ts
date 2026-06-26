@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/backend/db";
 import { meteredGenerateObject, pickAvailableModel } from "@/backend/llm";
-import type { Agent, AgentContext } from "./base";
+import { personaBlock, type Agent, type AgentContext } from "./base";
 
 const liDraftSchema = z.object({
   hook: z.string(),
@@ -35,6 +35,7 @@ export const linkedinAgent: Agent<LinkedInAgentInput, { draftId: string }> = {
       `Positioning: ${voice?.positioning || ctx.industry || "unknown"}`,
       `Voice tone: ${voice?.tone || "authoritative but human"}`,
       voice?.styleGuidelines?.length && `Style: ${voice.styleGuidelines.join(", ")}`,
+      personaBlock(ctx.persona),
       "",
       `Topic: ${input.topic}`,
       input.angle && `Angle: ${input.angle}`,

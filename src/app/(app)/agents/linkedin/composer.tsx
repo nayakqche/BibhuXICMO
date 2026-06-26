@@ -18,8 +18,12 @@ export function LinkedInComposer() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="space-y-1">
         <CardTitle>New post</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          For results that sound like you, add your persona above — paste it
+          or upload a PDF, DOC, CSV, XLSX, PNG, JPG or MP4.
+        </p>
       </CardHeader>
       <CardContent>
         <form

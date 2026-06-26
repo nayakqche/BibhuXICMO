@@ -28,6 +28,7 @@ import { igKindLabel, parseIgMeta, type IGKind } from "@/shared/instagram";
 import { hasIGCookies } from "@/backend/ig-cookies";
 import { resolveIgBusinessAccount } from "@/integrations/instagram";
 import { IGComposer } from "./composer";
+import { PersonaCard } from "@/frontend/components/app/persona-card";
 import { IGCookiesModal } from "./ig-cookies-modal";
 import { CampaignControls } from "./campaign-controls";
 import { CampaignForm } from "./campaign-form";
@@ -406,7 +407,8 @@ export default async function InstagramAgentPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="composer">
+          <TabsContent value="composer" className="space-y-6">
+            <PersonaCard initialPersona={workspace.persona ?? null} />
             <IGComposer />
           </TabsContent>
 

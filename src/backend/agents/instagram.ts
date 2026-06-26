@@ -16,7 +16,7 @@
 import { z } from "zod";
 import { prisma } from "@/backend/db";
 import { meteredGenerateObject, pickAvailableModel } from "@/backend/llm";
-import type { Agent, AgentContext } from "./base";
+import { personaBlock, type Agent, type AgentContext } from "./base";
 import {
   deriveIGKeywords,
   formatBrandContext,
@@ -169,6 +169,7 @@ export async function runIGPostGeneration(
         `Write an Instagram feed-post caption for the brand at ${ctx.websiteUrl}.`,
         formatBrandContext(ctx, voice),
         voice?.tone && `Tone: ${voice.tone}`,
+        personaBlock(ctx.persona),
         "",
         "Hook in the first line. 1–3 short paragraphs. Soft CTA at the end.",
         "Hashtags: 5–8 niche ones (no #love, #instagood, etc.).",
@@ -183,6 +184,7 @@ export async function runIGPostGeneration(
         `Write a Reel caption + concept for the brand at ${ctx.websiteUrl}.`,
         formatBrandContext(ctx, voice),
         voice?.tone && `Tone: ${voice.tone}`,
+        personaBlock(ctx.persona),
         "",
         "Caption: 1–2 short lines, very punchy hook.",
         "Visual prompt: 15–30s vertical video idea, scene-by-scene.",
@@ -196,6 +198,7 @@ export async function runIGPostGeneration(
       prompt: [
         `Write Story overlay text + a poll/sticker idea for ${ctx.websiteUrl}.`,
         formatBrandContext(ctx, voice),
+        personaBlock(ctx.persona),
         "",
         "Caption: under 150 chars total.",
         "Visual prompt: a single still or 5s video idea.",

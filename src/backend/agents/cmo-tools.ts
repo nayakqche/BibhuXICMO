@@ -236,6 +236,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -307,6 +308,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -336,6 +338,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -399,6 +402,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -430,6 +434,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -493,6 +498,7 @@ export function buildCmoTools(workspaceId: string) {
             industry: workspace.industry,
             icp: workspace.icp,
             voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
             preferredModel: CMO_PREFERRED_MODEL,
           };
           const r = await runIGOutreach(ctx, { campaignId: campaign.id });
@@ -521,6 +527,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
@@ -550,6 +557,7 @@ export function buildCmoTools(workspaceId: string) {
           industry: workspace.industry,
           icp: workspace.icp,
           voiceProfile: workspace.voiceProfile,
+          persona: workspace.persona ?? null,
           preferredModel: CMO_PREFERRED_MODEL,
         };
         try {
