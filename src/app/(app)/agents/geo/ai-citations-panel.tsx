@@ -58,31 +58,65 @@ function deltaClass(n: number | null): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Provider homepage whose favicon is the real brand logo. Empty string
- * means "skip the favicon chain and go straight to the inline SVG" —
- * used for providers whose favicon is a generic globe (so onError never
- * fires because the favicon service returns HTTP 200 with that globe).
+ * Per-platform logo source.
+ *
+ *   - kind: "favicon" — load via the Google favicon service for `domain`,
+ *     falling back to DuckDuckGo and finally the inline SVG.
+ *   - kind: "url" — load the given URL directly. Use this for providers
+ *     whose favicon is a generic globe (Microsoft serves one for
+ *     copilot.microsoft.com) — we point at the canonical Wikimedia
+ *     Commons SVG of the brand mark instead.
+ *   - kind: "inline" — skip image loading entirely and render the
+ *     PlatformIconFallback SVG.
  */
-const PLATFORM_LOGO_DOMAIN: Record<PlatformKey, string> = {
-  aiOverviews: "google.com",
-  chatgpt: "openai.com",
-  gemini: "gemini.google.com",
-  perplexity: "perplexity.ai",
-  copilot: "", // Microsoft's copilot.microsoft.com favicon is a generic globe.
-  grok: "grok.com",
+type PlatformLogo =
+  | { kind: "favicon"; domain: string }
+  | { kind: "url"; src: string }
+  | { kind: "inline" };
+
+const PLATFORM_LOGO: Record<PlatformKey, PlatformLogo> = {
+  aiOverviews: { kind: "favicon", domain: "google.com" },
+  chatgpt: { kind: "favicon", domain: "openai.com" },
+  gemini: { kind: "favicon", domain: "gemini.google.com" },
+  perplexity: { kind: "favicon", domain: "perplexity.ai" },
+  // Microsoft's Copilot favicon is a generic globe, so go straight to the
+  // canonical brand SVG hosted on Wikimedia Commons.
+  copilot: {
+    kind: "url",
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Microsoft_Copilot_Icon.svg/512px-Microsoft_Copilot_Icon.svg.png",
+  },
+  grok: { kind: "favicon", domain: "grok.com" },
 };
 
 function PlatformIcon({ k, className }: { k: PlatformKey; className?: string }) {
   const cls = cn("h-5 w-5", className);
   const [step, setStep] = useState(0);
-  const domain = PLATFORM_LOGO_DOMAIN[k];
+  const logo = PLATFORM_LOGO[k];
 
-  // step 0: Google favicon service · step 1: DuckDuckGo · step 2: inline SVG
-  if (step < 2 && domain) {
+  // Direct-URL logos: try the canonical brand mark first, fall back to
+  // the inline SVG if the host is down.
+  if (logo.kind === "url" && step < 1) {
+    return (
+      <span className={cn("relative inline-block overflow-hidden rounded-[4px]", cls)}>
+        <Image
+          src={logo.src}
+          alt={`${k} logo`}
+          fill
+          unoptimized
+          sizes="32px"
+          className="object-contain"
+          onError={() => setStep(1)}
+        />
+      </span>
+    );
+  }
+
+  // Favicon logos: step 0 Google, step 1 DuckDuckGo, step 2 inline.
+  if (logo.kind === "favicon" && step < 2) {
     const src =
       step === 0
-        ? `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(domain)}`
-        : `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`;
+        ? `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(logo.domain)}`
+        : `https://icons.duckduckgo.com/ip3/${encodeURIComponent(logo.domain)}.ico`;
     return (
       <span className={cn("relative inline-block overflow-hidden rounded-[4px]", cls)}>
         <Image
