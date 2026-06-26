@@ -79,15 +79,12 @@ const PLATFORM_LOGO: Record<PlatformKey, PlatformLogo> = {
   chatgpt: { kind: "favicon", domain: "openai.com" },
   gemini: { kind: "favicon", domain: "gemini.google.com" },
   perplexity: { kind: "favicon", domain: "perplexity.ai" },
-  // Microsoft serves a generic globe favicon for copilot.microsoft.com,
-  // so point at the canonical brand mark hosted on Wikimedia Commons
-  // (rendered 512px PNG of Microsoft's official Copilot icon). Public,
-  // CDN-cached, no auth required — falls back to the inline SVG below
-  // if Wikimedia is ever unreachable.
-  copilot: {
-    kind: "url",
-    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Microsoft_Copilot_Icon.svg/512px-Microsoft_Copilot_Icon.svg.png",
-  },
+  // Official Microsoft Copilot mark (from lobehub/lobe-icons), bundled
+  // in /public so it ships with the deploy — zero external deps, works
+  // on every network. Earlier external sources all failed: the favicon
+  // was a generic globe, Wikimedia was flaky, and kommodo.ai 403s on
+  // anonymous fetches.
+  copilot: { kind: "url", src: "/copilot-icon.png" },
   grok: { kind: "favicon", domain: "grok.com" },
 };
 
