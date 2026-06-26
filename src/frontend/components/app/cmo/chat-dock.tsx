@@ -165,7 +165,7 @@ export function ChatDock({
   }
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="flex h-full min-h-[480px] flex-col">
       <CardHeader className="space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Bot className="h-4 w-4 text-primary" aria-hidden />

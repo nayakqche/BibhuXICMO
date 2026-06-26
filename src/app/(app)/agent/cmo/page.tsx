@@ -59,7 +59,11 @@ export default async function CmoAgentPage() {
   const companyAnalyzing = isCompanyAnalysisEmpty(fast);
 
   return (
-    <div className="flex flex-col gap-6">
+    // Density: bump the text-base down to 13px (text-[13px]) so the whole
+    // dashboard reads at roughly 75% of the previous density at 100% zoom
+    // (mimicking the user's preferred 75% browser zoom) without forcing
+    // them to actually zoom out. Cards and gaps shrink accordingly.
+    <div className="flex flex-col gap-4 text-[13px]">
       <HeaderBar
         websiteUrl={workspace.websiteUrl}
         plan={plan}
@@ -67,15 +71,17 @@ export default async function CmoAgentPage() {
         hasRunsToday={hasRunsToday}
       />
 
-      <TerminalPanel lines={terminalLines} maxHeightClass="max-h-40" />
+      {/* Smaller terminal — was max-h-40, now max-h-28 = ~5 lines visible. */}
+      <TerminalPanel lines={terminalLines} maxHeightClass="max-h-28" />
 
       {/*
-        Dashboard quadrant: the four panels (Company, Analytics, Actions,
-        AI CMO chat) arranged as a 2x2 grid forming one big square. The
-        page itself scrolls, so the user can scroll the whole quadrant
-        into view — no internal column scrollbars on xl+ anymore.
+        Dashboard quadrant: 2x2 grid of self-sizing cards. Each card auto-
+        adjusts to its content (no hard min-heights), so a thin "Loading"
+        Company panel and a fully-loaded Analytics card no longer have to
+        match the tallest sibling's height. items-start prevents the grid
+        from stretching every card to the row's max height.
       */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid auto-rows-min items-start gap-4 md:grid-cols-2">
         <Suspense
           fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
         >
@@ -87,9 +93,7 @@ export default async function CmoAgentPage() {
         <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
           <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
         </Suspense>
-        <div className="min-h-[560px]">
-          <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
-        </div>
+        <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
       </div>
     </div>
   );
