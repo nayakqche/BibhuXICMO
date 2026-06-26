@@ -79,11 +79,12 @@ const PLATFORM_LOGO: Record<PlatformKey, PlatformLogo> = {
   chatgpt: { kind: "favicon", domain: "openai.com" },
   gemini: { kind: "favicon", domain: "gemini.google.com" },
   perplexity: { kind: "favicon", domain: "perplexity.ai" },
-  // Microsoft's Copilot favicon is a generic globe, so go straight to the
-  // canonical brand SVG hosted on Wikimedia Commons.
+  // Microsoft's Copilot favicon is a generic globe and the Wikimedia
+  // PNG was unreliable in some networks, so use the user-supplied
+  // hosted asset that has been verified in the production browser.
   copilot: {
     kind: "url",
-    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Microsoft_Copilot_Icon.svg/512px-Microsoft_Copilot_Icon.svg.png",
+    src: "https://kommodo.ai/i/QPBGXT1Wea4r48auNyCW",
   },
   grok: { kind: "favicon", domain: "grok.com" },
 };
