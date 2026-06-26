@@ -57,6 +57,8 @@ const GROUP_META: Record<
     label: string;
     icon: typeof Sparkles;
     cta: string;
+    /** Noun used in the collapsed summary line ("3 opportunities ready"). */
+    unit: string;
     /** When true, contents are blurred for FREE plan with an Upgrade CTA. */
     maxOnly?: boolean;
   }
@@ -65,19 +67,27 @@ const GROUP_META: Record<
     label: "Reddit opportunities",
     icon: MessageCircle,
     cta: "Post",
+    unit: "opportunity",
     maxOnly: true,
   },
   "seo-geo": {
     label: "SEO & GEO recommendations",
     icon: TrendingUp,
     cta: "Fix",
+    unit: "recommendation",
   },
-  x: { label: "X writer", icon: Hash, cta: "Post" },
-  articles: { label: "Articles", icon: FileText, cta: "Open" },
-  hn: { label: "Hacker News", icon: Newspaper, cta: "Open", maxOnly: true },
-  linkedin: { label: "LinkedIn writer", icon: Linkedin, cta: "Post", maxOnly: true },
-  other: { label: "Other actions", icon: Sparkles, cta: "Open" },
+  x: { label: "X writer", icon: Hash, cta: "Post", unit: "idea" },
+  articles: { label: "Articles", icon: FileText, cta: "Open", unit: "topic" },
+  hn: { label: "Hacker News", icon: Newspaper, cta: "Open", unit: "post", maxOnly: true },
+  linkedin: { label: "LinkedIn writer", icon: Linkedin, cta: "Post", unit: "post", maxOnly: true },
+  other: { label: "Other actions", icon: Sparkles, cta: "Open", unit: "action" },
 };
+
+/** "3 recommendations ready" / "1 post ready" */
+function summaryLine(count: number, unit: string): string {
+  const noun = count === 1 ? unit : `${unit}s`;
+  return `${count} ${noun} ready`;
+}
 
 /**
  * Per-agent visual identity for action rows. Each agent gets a small
@@ -264,8 +274,11 @@ export function ActionsFeed({
   for (const id of GROUP_ORDER) grouped.set(id, []);
   for (const item of items) grouped.get(groupKey(item.agent))!.push(item);
 
+  // Collapsed by default — the feed reads as a tidy stack of agent rows
+  // (icon · name · "N ready" · count), and you expand only the channel you
+  // want to act on. Keeps the panel calm instead of a wall of cramped rows.
   const [open, setOpen] = useState<Record<GroupId, boolean>>(
-    Object.fromEntries(GROUP_ORDER.map((g) => [g, true])) as Record<GroupId, boolean>
+    Object.fromEntries(GROUP_ORDER.map((g) => [g, false])) as Record<GroupId, boolean>
   );
 
   return (
@@ -314,17 +327,27 @@ export function ActionsFeed({
                 <button
                   type="button"
                   onClick={() => setOpen((p) => ({ ...p, [g]: !p[g] }))}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-muted/20"
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-muted/20"
                   aria-expanded={isOpen}
                 >
                   <GroupTile groupId={g} />
-                  <span className="font-semibold tracking-tight">{meta.label}</span>
-                  <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {/* min-w-0 lets this column shrink and truncate instead of
+                      shoving the count/chevron off-screen at narrow widths. */}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold tracking-tight">
+                      {meta.label}
+                    </div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {summaryLine(list.length, meta.unit)}
+                    </div>
+                  </div>
+                  {/* Prominent count badge — the "how many to fix" signal. */}
+                  <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[11px] font-semibold tabular-nums text-primary">
                     {list.length}
                   </span>
                   <ChevronDown
                     className={
-                      "ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform " +
+                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform " +
                       (isOpen ? "rotate-180" : "")
                     }
                     aria-hidden
@@ -373,42 +396,48 @@ function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
   const brand = agentBrand(item.agent);
 
   return (
-    <li className="group flex items-start gap-3 px-3 py-3 text-sm transition-colors hover:bg-muted/30">
-      <AgentTile agent={item.agent} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${brand.textAccent}`}
-          >
-            {brand.label}
-          </span>
-          <span className="text-muted-foreground/40">·</span>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            <PriorityLabel p={item.priority} />
-          </span>
+    <li className="flex flex-col gap-2 px-3 py-3 text-sm transition-colors hover:bg-muted/30">
+      {/* Row 1: tile + text. min-w-0 + truncate/clamp guarantees the text
+          column shrinks cleanly and never overlaps anything. */}
+      <div className="flex items-start gap-2.5">
+        <AgentTile agent={item.agent} size="sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] ${brand.textAccent}`}
+            >
+              {brand.label}
+            </span>
+            <PriorityPill p={item.priority} />
+          </div>
+          <div className="mt-0.5 line-clamp-2 break-words font-medium leading-snug text-foreground">
+            {item.title}
+          </div>
+          {item.summary ? (
+            <p className="mt-1 line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">
+              {item.summary}
+            </p>
+          ) : null}
         </div>
-        <div className="mt-0.5 truncate font-medium leading-snug text-foreground">
-          {item.title}
-        </div>
-        {item.summary ? (
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-            {item.summary}
-          </p>
-        ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+
+      {/* Row 2: actions on their own line — structurally can't collide with
+          the text above, so the layout holds at any panel width. */}
+      <div className="flex items-center gap-1.5 pl-[2.125rem]">
         {item.href ? (
-          <Button size="sm" variant="default" asChild>
+          <Button size="sm" variant="default" className="h-7 flex-1 gap-1 px-2 text-xs" asChild>
             <Link href={item.href}>
-              {item.cta || cta}
-              <ArrowRight className="h-3 w-3" aria-hidden />
+              <span className="truncate">{item.cta || cta}</span>
+              <ArrowRight className="h-3 w-3 shrink-0" aria-hidden />
             </Link>
           </Button>
-        ) : null}
+        ) : (
+          <span className="flex-1" />
+        )}
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-7 w-7 shrink-0"
           aria-label="Mark done"
           disabled={isPending}
           onClick={() =>
@@ -423,7 +452,7 @@ function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-7 w-7 shrink-0"
           aria-label="Dismiss"
           disabled={isPending}
           onClick={() =>
@@ -440,22 +469,22 @@ function ActionRow({ item, cta }: { item: ActionLite; cta: string }) {
   );
 }
 
-function PriorityLabel({ p }: { p: string }) {
-  const label =
-    p === "URGENT" || p === "HIGH"
-      ? "High priority"
-      : p === "MEDIUM"
-        ? "Medium priority"
-        : "Low priority";
-  const color =
-    p === "URGENT"
-      ? "text-red-500"
-      : p === "HIGH"
-        ? "text-orange-500"
-        : p === "MEDIUM"
-          ? "text-amber-500"
-          : "text-muted-foreground";
-  return <span className={color}>{label}</span>;
+/** Compact coloured priority pill — fixed width, never wraps or overflows. */
+function PriorityPill({ p }: { p: string }) {
+  const high = p === "URGENT" || p === "HIGH";
+  const label = high ? "High" : p === "MEDIUM" ? "Medium" : "Low";
+  const cls = high
+    ? "bg-orange-500/15 text-orange-500"
+    : p === "MEDIUM"
+      ? "bg-amber-500/15 text-amber-500"
+      : "bg-muted text-muted-foreground";
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${cls}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 
