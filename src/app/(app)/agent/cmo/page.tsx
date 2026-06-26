@@ -70,13 +70,19 @@ export default async function CmoAgentPage() {
       <TerminalPanel lines={terminalLines} />
 
       {/*
-        Responsive density: a single 4-up row only when there's genuinely
-        room for it (2xl ≥ 1536px). Below that we drop to a roomy 2×2 grid
-        so each panel keeps a comfortable width instead of squashing text
-        to one word per line. Stacks to a single column on small screens.
+        Responsive density:
+          - default: single stacked column (mobile)
+          - md (768px+): 2×2 grid
+          - xl (1280px+): 4 columns side-by-side at normal laptop width
+
+        On xl+ each column gets a fixed viewport-anchored height so the
+        page itself does not scroll — instead each panel scrolls
+        internally via its own overflow-y-auto. Net result: at 100% zoom
+        you see all four columns at once and use the scrollbar inside
+        whichever column you want.
       */}
-      <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-4">
-        <div>
+      <div className="grid gap-5 md:grid-cols-2 xl:h-[calc(100vh-260px)] xl:grid-cols-4 xl:gap-4">
+        <div className="min-h-0 xl:h-full xl:overflow-y-auto">
           {/*
             The fallback shows the "analyzing" state only when the workspace
             has a URL but no strategy artifacts yet (fresh site). Once the
@@ -90,17 +96,17 @@ export default async function CmoAgentPage() {
             <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div>
+        <div className="min-h-0 xl:h-full xl:overflow-y-auto">
           <Suspense fallback={<AnalyticsSkeleton />}>
             <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
           </Suspense>
         </div>
-        <div className="flex flex-col gap-5">
+        <div className="flex min-h-0 flex-col gap-5 xl:h-full">
           <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
             <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
           </Suspense>
         </div>
-        <div className="min-h-[640px]">
+        <div className="min-h-[640px] xl:h-full xl:min-h-0">
           <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
         </div>
       </div>
