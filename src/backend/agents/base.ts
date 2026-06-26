@@ -8,9 +8,23 @@ export type AgentContext = {
   industry: string | null;
   icp: string | null;
   voiceProfile: unknown;
+  /** Optional user-supplied persona/brand context (pasted or extracted from uploads). */
+  persona: string | null;
   /** When set (e.g. AI CMO dock tools), `pickAvailableModel` starts here before global fallbacks. */
   preferredModel?: SupportedModel;
 };
+
+/**
+ * Formats the workspace persona into a prompt fragment, capped so a huge
+ * pasted doc can't blow the context budget. Returns "" when no persona is
+ * set so prompt builders can `.filter(Boolean)` it out cleanly.
+ */
+export function personaBlock(persona: string | null | undefined): string {
+  const p = persona?.trim();
+  if (!p) return "";
+  const clipped = p.length > 4000 ? `${p.slice(0, 4000)}…` : p;
+  return `Creator persona & brand context (match this voice, tone, and style closely; prefer the examples and phrasing here over generic defaults):\n${clipped}`;
+}
 
 export interface Agent<TInput = unknown, TOutput = unknown> {
   id: string;
@@ -46,6 +60,7 @@ export async function executeAgent<T>(
     industry: workspace.industry,
     icp: workspace.icp,
     voiceProfile: workspace.voiceProfile,
+    persona: workspace.persona ?? null,
     preferredModel: opts?.preferredModel,
   };
 

@@ -5,6 +5,7 @@ import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
 import { XRunButtons } from "@/frontend/components/app/x-run-buttons";
 import { XComposer } from "./composer";
+import { PersonaCard } from "@/frontend/components/app/persona-card";
 import { Badge } from "@/frontend/components/ui/badge";
 import {
   Card,
@@ -146,7 +147,8 @@ export default async function XAgentPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="composer">
+        <TabsContent value="composer" className="space-y-6">
+          <PersonaCard initialPersona={workspace.persona ?? null} />
           <XComposer />
         </TabsContent>
 

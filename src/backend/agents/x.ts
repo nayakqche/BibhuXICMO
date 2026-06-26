@@ -17,7 +17,7 @@ import { z } from "zod";
 import { prisma } from "@/backend/db";
 import { meteredGenerateObject, pickAvailableModel } from "@/backend/llm";
 import { parseXMeta, type XKind } from "@/shared/x";
-import type { Agent, AgentContext } from "./base";
+import { personaBlock, type Agent, type AgentContext } from "./base";
 import { upsertXThread } from "./x-db";
 import {
   discoverRelevantXTweets,
@@ -84,6 +84,7 @@ export async function runXAdHocDraft(
     `Positioning: ${voice?.positioning || ctx.industry || "unknown"}`,
     `Voice tone: ${voice?.tone || "professional but conversational"}`,
     voice?.styleGuidelines?.length && `Style: ${voice.styleGuidelines.join(", ")}`,
+    personaBlock(ctx.persona),
     "",
     `Topic: ${input.topic}`,
     input.angle && `Angle: ${input.angle}`,

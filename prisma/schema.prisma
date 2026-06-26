@@ -91,6 +91,11 @@ model Workspace {
   industry          String?
   icp               String? // Ideal customer profile (free text)
   voiceProfile      Json? // brand voice, tone, style guide
+  /// Optional persona/brand context the user pastes or uploads (LinkedIn / X /
+  /// Instagram agents). Free text — merged into draft-generation prompts so
+  /// posts match the user's own voice and examples. Text extracted from
+  /// uploaded text files is appended here client-side before saving.
+  persona           String?
   /// Cached structured LLM analysis for /agent/cmo (homepage-only; refreshed when stale or URL changes).
   cmoLlmSnapshot    Json?
   /// Cached Ahrefs snapshot (DR, backlinks, traffic, top keywords/countries/pages).

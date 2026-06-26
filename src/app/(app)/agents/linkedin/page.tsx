@@ -3,6 +3,7 @@ import { prisma } from "@/backend/db";
 import { GenericAgentPage } from "@/frontend/components/app/generic-agent-page";
 import { hasLinkedInApifyToken } from "@/integrations/linkedin-apify";
 import { LinkedinLogo } from "@/frontend/components/brand-logos";
+import { PersonaCard } from "@/frontend/components/app/persona-card";
 import { LinkedInComposer } from "./composer";
 import { LinkedInTools } from "./linkedin-tools";
 
@@ -66,6 +67,7 @@ export default async function LinkedInAgentPage() {
             defaultCompany={defaultCompanyTarget(workspace)}
             hasApifyToken={hasLinkedInApifyToken()}
           />
+          <PersonaCard initialPersona={workspace.persona ?? null} />
           <LinkedInComposer />
         </div>
       }
