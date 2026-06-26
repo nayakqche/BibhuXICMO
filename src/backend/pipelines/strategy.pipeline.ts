@@ -204,6 +204,12 @@ export class StrategyPipeline {
             : ["product", "features", "pricing"],
         },
       ],
+      // brandVoiceDoc + marketingStrategyDoc are required by the schema but
+      // we leave them empty in the fallback. The Company panel's
+      // buildBrandVoiceDoc / buildMarketingStrategyDoc helpers detect an
+      // empty doc and compose a structured fallback from the other fields.
+      brandVoiceDoc: "",
+      marketingStrategyDoc: "",
       firstActions: buildFallbackFirstActions(),
     };
   }
