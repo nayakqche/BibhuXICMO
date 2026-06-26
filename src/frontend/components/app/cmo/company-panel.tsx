@@ -20,9 +20,11 @@ import {
   Users,
   Youtube,
 } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "@/frontend/components/ui/button";
 import { SiteQuickAdd } from "@/frontend/components/app/cmo/site-quick-add";
 import { CompetitorPill } from "@/frontend/components/app/cmo/competitor-pill";
+import { DocumentDrawer } from "@/frontend/components/app/cmo/document-drawer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/frontend/components/ui/card";
 import { forceReauditAction } from "@/app/(app)/settings/actions";
 import type { CmoFastData, CmoSlowData } from "@/backend/agents/cmo-data";
@@ -47,6 +49,9 @@ const SECTIONS: Array<{ id: Section; label: string; icon: typeof FileText }> = [
  * strategy LLM came back thin, so the panel can never get stuck polling a
  * voice profile that will never fill.
  */
+/** Sections that open as a full side-drawer document instead of inline. */
+const DRAWER_SECTIONS = new Set<Section>(["voice", "strategy"]);
+
 export function CompanyPanel({
   data,
   analyzing = false,
@@ -55,7 +60,31 @@ export function CompanyPanel({
   analyzing?: boolean;
 }) {
   const [open, setOpen] = useState<Section | null>(null);
+  const [drawer, setDrawer] = useState<{
+    title: string;
+    markdown: string;
+    fileBase: string;
+  } | null>(null);
   const hasUrl = !!data.workspace.websiteUrl;
+
+  const siteName =
+    data.voice?.siteTitle?.trim() || data.workspace.name || "Your brand";
+
+  function openSectionDrawer(section: Section) {
+    if (section === "voice") {
+      setDrawer({
+        title: "Brand Voice",
+        markdown: buildBrandVoiceDoc(data, siteName),
+        fileBase: `${slugify(siteName)}-brand-voice`,
+      });
+    } else if (section === "strategy") {
+      setDrawer({
+        title: "Marketing Strategy",
+        markdown: buildMarketingStrategyDoc(data, siteName),
+        fileBase: `${slugify(siteName)}-marketing-strategy`,
+      });
+    }
+  }
 
   const description =
     data.liveSnapshot?.description?.trim() ||
@@ -115,24 +144,34 @@ export function CompanyPanel({
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Documents
           </div>
-          {SECTIONS.map((s) => (
-            <DocumentCard
-              key={s.id}
-              icon={s.icon}
-              label={s.label}
-              isReady={sectionHasContent(s.id, data)}
-              isPending={analyzing && !sectionHasContent(s.id, data)}
-              isOpen={open === s.id}
-              onToggle={() => setOpen(open === s.id ? null : s.id)}
-            >
-              <DocumentBody
-                section={s.id}
-                data={data}
-                analyzing={analyzing}
-                hasUrl={hasUrl}
-              />
-            </DocumentCard>
-          ))}
+          {SECTIONS.map((s) => {
+            const opensDrawer = DRAWER_SECTIONS.has(s.id);
+            return (
+              <DocumentCard
+                key={s.id}
+                icon={s.icon}
+                label={s.label}
+                isReady={sectionHasContent(s.id, data)}
+                isPending={analyzing && !sectionHasContent(s.id, data)}
+                isOpen={!opensDrawer && open === s.id}
+                opensDrawer={opensDrawer}
+                onToggle={() =>
+                  opensDrawer
+                    ? openSectionDrawer(s.id)
+                    : setOpen(open === s.id ? null : s.id)
+                }
+              >
+                {!opensDrawer ? (
+                  <DocumentBody
+                    section={s.id}
+                    data={data}
+                    analyzing={analyzing}
+                    hasUrl={hasUrl}
+                  />
+                ) : null}
+              </DocumentCard>
+            );
+          })}
         </div>
 
         {data.topCompetitors.length > 0 ? (
@@ -148,8 +187,195 @@ export function CompanyPanel({
           </div>
         ) : null}
       </CardContent>
+
+      {drawer ? (
+        <DocumentDrawer
+          open={!!drawer}
+          onOpenChange={(v) => {
+            if (!v) setDrawer(null);
+          }}
+          title={drawer.title}
+          markdown={drawer.markdown}
+          fileBase={drawer.fileBase}
+        />
+      ) : null}
     </Card>
   );
+}
+
+type CompetitorRow = { key: string; pillValue: string; note: string | null };
+
+/**
+ * Merge the competitors[] strings with competitorNotes[] into display rows.
+ * Matching is loose (normalized name/domain substring) since the LLM may
+ * phrase the name slightly differently across the two arrays.
+ */
+function buildCompetitorRows(
+  competitors: string[],
+  notes: Array<{ name: string; domain?: string; note: string }>
+): CompetitorRow[] {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const used = new Set<number>();
+
+  const rows: CompetitorRow[] = competitors.slice(0, 12).map((c, i) => {
+    const cn = norm(c);
+    let matched: { name: string; domain?: string; note: string } | undefined;
+    notes.forEach((n, idx) => {
+      if (matched || used.has(idx)) return;
+      const nn = norm(n.name);
+      const dn = n.domain ? norm(n.domain) : "";
+      if ((nn && cn.includes(nn)) || (nn && nn.includes(cn)) || (dn && cn.includes(dn))) {
+        matched = n;
+        used.add(idx);
+      }
+    });
+    return {
+      key: `${c}-${i}`,
+      pillValue: c,
+      note: matched?.note ?? null,
+    };
+  });
+
+  // Append any notes that didn't match a competitor string (so nothing is lost).
+  notes.forEach((n, idx) => {
+    if (used.has(idx)) return;
+    rows.push({
+      key: `note-${idx}`,
+      pillValue: n.domain ? `${n.name} (${n.domain})` : n.name,
+      note: n.note,
+    });
+  });
+
+  return rows;
+}
+
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "brand"
+  );
+}
+
+/**
+ * Brand Voice document for the side drawer. Prefers the LLM-authored
+ * `brandVoiceDoc`; otherwise composes a structured fallback from the
+ * voice profile so the drawer is always useful.
+ */
+function buildBrandVoiceDoc(data: CompanyData, siteName: string): string {
+  const v = data.voice;
+  if (v?.brandVoiceDoc && v.brandVoiceDoc.trim().length > 40) {
+    return v.brandVoiceDoc;
+  }
+  const tone = v?.brandVoice?.tone ?? v?.tone;
+  const style = v?.brandVoice?.style ?? v?.styleGuidelines?.join("; ");
+  const avoid = v?.brandVoice?.avoid ?? v?.avoid ?? [];
+  const props = v?.valueProps ?? [];
+
+  const lines: string[] = [`# ${siteName} — Brand Voice`, ""];
+  if (v?.positioning) {
+    lines.push("## Positioning", "", v.positioning, "");
+  }
+  lines.push("## Voice & tone", "");
+  lines.push(tone ? tone : "_Run the SEO/strategy agent to generate a tone profile._", "");
+  if (style) {
+    lines.push("## Style guidelines", "", style, "");
+  }
+  if (props.length) {
+    lines.push("## Messaging pillars", "");
+    for (const p of props) lines.push(`- ${p}`);
+    lines.push("");
+  }
+  if (avoid.length) {
+    lines.push("## What to avoid", "");
+    for (const a of avoid) lines.push(`- ${typeof a === "string" ? a : String(a)}`);
+    lines.push("");
+  }
+  lines.push(
+    "> This is a structured fallback. Re-run the strategy agent for a full, written brand-voice guide with example rewrites."
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Marketing Strategy document for the side drawer. Prefers the LLM-authored
+ * `marketingStrategyDoc`; otherwise composes a structured fallback (with
+ * tables) from the voice profile + workspace fields.
+ */
+function buildMarketingStrategyDoc(data: CompanyData, siteName: string): string {
+  const v = data.voice;
+  if (v?.marketingStrategyDoc && v.marketingStrategyDoc.trim().length > 60) {
+    return v.marketingStrategyDoc;
+  }
+  const lines: string[] = [`# ${siteName} — Marketing Strategy`, ""];
+  if (data.workspace.industry) lines.push(`**Industry:** ${data.workspace.industry}`, "");
+  if (data.workspace.icp) lines.push("## Ideal customer profile", "", data.workspace.icp, "");
+  if (v?.positioning) lines.push("## Positioning", "", v.positioning, "");
+
+  const channels = v?.channels ?? [];
+  if (channels.length) {
+    lines.push("## Channel strategy", "");
+    lines.push("| Channel | Why it fits |");
+    lines.push("| --- | --- |");
+    for (const c of channels) lines.push(`| ${channelLabel(c)} | ${channelRationale(c)} |`);
+    lines.push("");
+  }
+
+  const clusters = v?.topicClusters ?? [];
+  if (clusters.length) {
+    lines.push("## Content pillars", "");
+    lines.push("| Theme | Target keywords |");
+    lines.push("| --- | --- |");
+    for (const c of clusters)
+      lines.push(`| ${c.theme} | ${(c.keywords ?? []).slice(0, 6).join(", ")} |`);
+    lines.push("");
+  }
+
+  const props = v?.valueProps ?? [];
+  if (props.length) {
+    lines.push("## Value propositions", "");
+    for (const p of props) lines.push(`- ${p}`);
+    lines.push("");
+  }
+
+  if (v?.competitors?.length) {
+    lines.push("## Competitive set", "");
+    for (const c of v.competitors.slice(0, 10)) lines.push(`- ${c}`);
+    lines.push("");
+  }
+
+  lines.push(
+    "> This is a structured fallback. Re-run the strategy agent for a full CMO-grade plan with a 90-day roadmap and KPIs."
+  );
+  return lines.join("\n");
+}
+
+const CHANNEL_LABELS: Record<string, string> = {
+  seo: "SEO",
+  geo: "GEO (AI search)",
+  reddit: "Reddit",
+  x: "X / Twitter",
+  linkedin: "LinkedIn",
+  hackernews: "Hacker News",
+  content: "Content / Blog",
+};
+function channelLabel(c: string): string {
+  return CHANNEL_LABELS[c] ?? c;
+}
+const CHANNEL_RATIONALE: Record<string, string> = {
+  seo: "Capture high-intent search demand and compound organic traffic.",
+  geo: "Get cited by ChatGPT, Gemini, Perplexity and AI Overviews.",
+  reddit: "Engage buying-intent threads with authentic, helpful replies.",
+  x: "Build founder/brand voice and ride real-time conversations.",
+  linkedin: "Reach decision-makers with thought-leadership content.",
+  hackernews: "Tap technical early adopters via Show/Ask HN.",
+  content: "Own the narrative with long-form, search-optimized articles.",
+};
+function channelRationale(c: string): string {
+  return CHANNEL_RATIONALE[c] ?? "High-leverage channel for this audience.";
 }
 
 function DocumentCard({
@@ -158,6 +384,7 @@ function DocumentCard({
   isOpen,
   isReady,
   isPending,
+  opensDrawer,
   onToggle,
   children,
 }: {
@@ -166,6 +393,8 @@ function DocumentCard({
   isOpen: boolean;
   isReady?: boolean;
   isPending?: boolean;
+  /** When true, the card opens a side drawer; show an open-in icon, no inline body. */
+  opensDrawer?: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
@@ -175,7 +404,8 @@ function DocumentCard({
         type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/40"
-        aria-expanded={isOpen}
+        aria-expanded={opensDrawer ? undefined : isOpen}
+        title={opensDrawer ? `Open ${label} document` : undefined}
       >
         <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
         <span className="flex-1 truncate">{label}</span>
@@ -189,15 +419,19 @@ function DocumentCard({
             new
           </span>
         ) : null}
-        <ChevronDown
-          className={
-            "h-3.5 w-3.5 text-muted-foreground transition-transform " +
-            (isOpen ? "rotate-180" : "")
-          }
-          aria-hidden
-        />
+        {opensDrawer ? (
+          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+        ) : (
+          <ChevronDown
+            className={
+              "h-3.5 w-3.5 text-muted-foreground transition-transform " +
+              (isOpen ? "rotate-180" : "")
+            }
+            aria-hidden
+          />
+        )}
       </button>
-      {isOpen ? (
+      {!opensDrawer && isOpen ? (
         <div className="border-t px-3 py-3 text-xs leading-relaxed text-muted-foreground">
           {children}
         </div>
@@ -343,19 +577,29 @@ function DocumentBody({
     }
     case "competitors": {
       const enrich = data.llmAnalysis?.documentEnrichment;
-      if (!v?.competitors?.length && !enrich?.competitorAngles) {
+      const notes = v?.competitorNotes ?? [];
+      if (!v?.competitors?.length && !notes.length && !enrich?.competitorAngles) {
         if (!hasUrl) return <p>Add your website to find competitors.</p>;
         return <SectionPlaceholder analyzing={analyzing} label="competitor analysis" />;
       }
+      // Build a unified list: prefer notes (name + domain + summary); fall
+      // back to bare competitor strings when no note exists for one.
+      const rows = buildCompetitorRows(v?.competitors ?? [], notes);
       return (
-        <div className="space-y-2">
-          {v?.competitors?.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {v.competitors.slice(0, 12).map((c) => (
-                <CompetitorPill key={c} competitor={c} />
-              ))}
+        <div className="space-y-2.5">
+          {rows.map((r) => (
+            <div
+              key={r.key}
+              className="flex items-start gap-2 rounded-md border bg-card/50 p-2"
+            >
+              <CompetitorPill competitor={r.pillValue} size="sm" />
+              {r.note ? (
+                <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
+                  {r.note}
+                </p>
+              ) : null}
             </div>
-          ) : null}
+          ))}
           {enrich?.competitorAngles ? (
             <p className="rounded-md border border-dashed bg-muted/20 p-2 text-[11px]">
               <span className="font-medium text-foreground">AI angle:</span>{" "}
