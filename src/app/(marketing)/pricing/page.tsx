@@ -21,7 +21,6 @@ const MAX_FEATURES = [
   "Reddit, X, LinkedIn OAuth + publish queue",
   "GSC + GA4 integrations",
   "GEO score tracking",
-  "Coding Agent (GitHub PRs)",
   "Priority email support",
 ];
 

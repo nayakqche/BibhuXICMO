@@ -76,7 +76,7 @@ const PROVIDERS: Array<{
     provider: "GITHUB",
     slug: "github",
     name: "GitHub",
-    description: "Let the Coding Agent open pull requests with technical SEO fixes.",
+    description: "Connect your GitHub account for repository visibility.",
     icon: Github,
   },
 ];

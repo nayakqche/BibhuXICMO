@@ -67,46 +67,27 @@ export default async function CmoAgentPage() {
         hasRunsToday={hasRunsToday}
       />
 
-      <TerminalPanel lines={terminalLines} />
+      <TerminalPanel lines={terminalLines} maxHeightClass="max-h-40" />
 
       {/*
-        Responsive density:
-          - default: single stacked column (mobile)
-          - md (768px+): 2×2 grid
-          - xl (1280px+): 4 columns side-by-side at normal laptop width
-
-        On xl+ each column gets a fixed viewport-anchored height so the
-        page itself does not scroll — instead each panel scrolls
-        internally via its own overflow-y-auto. Net result: at 100% zoom
-        you see all four columns at once and use the scrollbar inside
-        whichever column you want.
+        Dashboard quadrant: the four panels (Company, Analytics, Actions,
+        AI CMO chat) arranged as a 2x2 grid forming one big square. The
+        page itself scrolls, so the user can scroll the whole quadrant
+        into view — no internal column scrollbars on xl+ anymore.
       */}
-      <div className="grid gap-5 md:grid-cols-2 xl:h-[calc(100vh-260px)] xl:grid-cols-4 xl:gap-4">
-        <div className="min-h-0 xl:h-full xl:overflow-y-auto">
-          {/*
-            The fallback shows the "analyzing" state only when the workspace
-            has a URL but no strategy artifacts yet (fresh site). Once the
-            slow phase resolves, CompanyPanelWithLive renders with
-            analyzing=false — so a thin LLM result lands on a clean empty
-            state instead of an endless spinner.
-          */}
-          <Suspense
-            fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
-          >
-            <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
-          </Suspense>
-        </div>
-        <div className="min-h-0 xl:h-full xl:overflow-y-auto">
-          <Suspense fallback={<AnalyticsSkeleton />}>
-            <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
-          </Suspense>
-        </div>
-        <div className="flex min-h-0 flex-col gap-5 xl:h-full">
-          <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
-            <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
-          </Suspense>
-        </div>
-        <div className="min-h-[640px] xl:h-full xl:min-h-0">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Suspense
+          fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
+        >
+          <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
+        </Suspense>
+        <Suspense fallback={<AnalyticsSkeleton />}>
+          <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
+        </Suspense>
+        <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
+          <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
+        </Suspense>
+        <div className="min-h-[560px]">
           <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
         </div>
       </div>

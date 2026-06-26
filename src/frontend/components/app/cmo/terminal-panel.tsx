@@ -11,10 +11,13 @@ export function TerminalPanel({
   lines,
   intervalMs = 220,
   className,
+  maxHeightClass = "max-h-56",
 }: {
   lines: TerminalLine[];
   intervalMs?: number;
   className?: string;
+  /** Tailwind max-height class on the scrolling body (default max-h-56). */
+  maxHeightClass?: string;
 }) {
   const [shown, setShown] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -49,7 +52,7 @@ export function TerminalPanel({
       </div>
       <CardContent
         ref={containerRef}
-        className="max-h-56 space-y-1 overflow-y-auto py-3 text-zinc-300"
+        className={`${maxHeightClass} space-y-1 overflow-y-auto py-3 text-zinc-300`}
       >
         {finalLines.slice(0, shown).map((line, i) => (
           <div key={i} className="leading-relaxed">
