@@ -37,6 +37,12 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "**" },
     ],
+    // Required for next/image to render SVGs from /public (e.g. the
+    // bundled Copilot brand mark). We only ship trusted SVGs ourselves;
+    // the sandboxed CSP below keeps any remote SVG inert.
+    dangerouslyAllowSVG: true,
+    contentDispositionType: "attachment",
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
   serverExternalPackages: ["@prisma/client", "bcryptjs"],
 };
