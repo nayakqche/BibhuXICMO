@@ -79,12 +79,14 @@ const PLATFORM_LOGO: Record<PlatformKey, PlatformLogo> = {
   chatgpt: { kind: "favicon", domain: "openai.com" },
   gemini: { kind: "favicon", domain: "gemini.google.com" },
   perplexity: { kind: "favicon", domain: "perplexity.ai" },
-  // Microsoft's Copilot favicon is a generic globe and the Wikimedia
-  // PNG was unreliable in some networks, so use the user-supplied
-  // hosted asset that has been verified in the production browser.
+  // Microsoft serves a generic globe favicon for copilot.microsoft.com,
+  // so point at the canonical brand mark hosted on Wikimedia Commons
+  // (rendered 512px PNG of Microsoft's official Copilot icon). Public,
+  // CDN-cached, no auth required — falls back to the inline SVG below
+  // if Wikimedia is ever unreachable.
   copilot: {
     kind: "url",
-    src: "https://kommodo.ai/i/QPBGXT1Wea4r48auNyCW",
+    src: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Microsoft_Copilot_Icon.svg/512px-Microsoft_Copilot_Icon.svg.png",
   },
   grok: { kind: "favicon", domain: "grok.com" },
 };
@@ -161,38 +163,30 @@ function PlatformIconFallback({ k, className }: { k: PlatformKey; className?: st
         </svg>
       );
     case "copilot":
-      // Stylised Copilot ribbon — flowing S-curve stroke with the official
-      // Microsoft Copilot brand gradient (blue → green → magenta → orange).
-      // gradientUnits=userSpaceOnUse keeps the gradient stable when the icon
-      // is scaled by Tailwind size classes.
+      // Last-resort placeholder if both Wikimedia and the favicon chain
+      // fail. Solid gradient blob with a "C" cut — deliberately abstract
+      // because hand-drawing the actual Copilot ribbon paths in 24px is
+      // a losing game. Real users will see the Wikimedia image above.
       return (
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          className={cls}
-          aria-hidden
-        >
+        <svg viewBox="0 0 24 24" fill="none" className={cls} aria-hidden>
           <defs>
             <linearGradient
-              id="copilot-grad"
-              x1="2"
-              y1="4"
-              x2="22"
-              y2="20"
+              id="copilot-fallback-grad"
+              x1="0"
+              y1="0"
+              x2="24"
+              y2="24"
               gradientUnits="userSpaceOnUse"
             >
               <stop offset="0%" stopColor="#1B88FF" />
-              <stop offset="33%" stopColor="#2DC56E" />
-              <stop offset="66%" stopColor="#E66A8C" />
+              <stop offset="35%" stopColor="#2DC56E" />
+              <stop offset="65%" stopColor="#E66A8C" />
               <stop offset="100%" stopColor="#FF8534" />
             </linearGradient>
           </defs>
           <path
-            d="M7.2 5.4C5 5.4 3.4 7 3.4 9.2c0 2.2 1.6 3.8 3.8 3.8h2.2c1 0 1.7.7 1.7 1.7s-.7 1.7-1.7 1.7H7.2c-2.2 0-3.8 1.6-3.8 3.8M16.8 18.6c2.2 0 3.8-1.6 3.8-3.8 0-2.2-1.6-3.8-3.8-3.8h-2.2c-1 0-1.7-.7-1.7-1.7s.7-1.7 1.7-1.7h2.2c2.2 0 3.8-1.6 3.8-3.8"
-            stroke="url(#copilot-grad)"
-            strokeWidth="2.3"
-            strokeLinecap="round"
-            fill="none"
+            d="M12 3a9 9 0 100 18 9 9 0 000-18zm0 4.5a4.5 4.5 0 014.5 4.5h-3a1.5 1.5 0 00-3 0v3a1.5 1.5 0 003 0h3a4.5 4.5 0 11-4.5-7.5z"
+            fill="url(#copilot-fallback-grad)"
           />
         </svg>
       );
