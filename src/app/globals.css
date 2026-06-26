@@ -27,30 +27,36 @@
   }
 
   /**
-   * Purple-black dark theme.
-   * Hue 264 (violet) carried across surfaces for a subtle purple cast,
-   * very low lightness on background, slight lift on cards.
+   * Claude Code-inspired dark theme.
+   *
+   * Near-black neutral background with a very faint warm tint, low-
+   * saturation neutral text, soft hairline borders, and a warm orange
+   * primary accent (matching Claude's brand mark).
+   *
+   * Hue 28 (warm orange) on the primary; surfaces sit on hue 30 with
+   * extremely low saturation so the chrome reads as "dark paper" rather
+   * than a coloured cast.
    */
   .dark {
-    --background: 264 24% 5%;
-    --foreground: 270 20% 96%;
-    --card: 264 22% 8%;
-    --card-foreground: 270 20% 96%;
-    --popover: 264 22% 8%;
-    --popover-foreground: 270 20% 96%;
-    --primary: 264 83% 70%;
+    --background: 30 6% 7%;
+    --foreground: 30 12% 92%;
+    --card: 30 6% 9%;
+    --card-foreground: 30 12% 92%;
+    --popover: 30 6% 9%;
+    --popover-foreground: 30 12% 92%;
+    --primary: 24 95% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 264 18% 14%;
-    --secondary-foreground: 270 20% 96%;
-    --muted: 264 18% 14%;
-    --muted-foreground: 264 12% 66%;
-    --accent: 264 25% 18%;
-    --accent-foreground: 270 20% 96%;
-    --destructive: 0 65% 45%;
+    --secondary: 30 5% 14%;
+    --secondary-foreground: 30 12% 92%;
+    --muted: 30 5% 13%;
+    --muted-foreground: 30 8% 62%;
+    --accent: 30 6% 16%;
+    --accent-foreground: 30 12% 92%;
+    --destructive: 0 65% 50%;
     --destructive-foreground: 0 0% 98%;
-    --border: 264 18% 18%;
-    --input: 264 18% 18%;
-    --ring: 264 83% 70%;
+    --border: 30 6% 18%;
+    --input: 30 6% 16%;
+    --ring: 24 95% 56%;
   }
 
   * {

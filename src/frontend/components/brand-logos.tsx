@@ -68,3 +68,130 @@ export function FacebookLogo({ className }: LogoProps) {
     </svg>
   );
 }
+
+/**
+ * Reddit "Snoo" mark — solid Reddit orange (#FF4500) circle with the
+ * antenna + face cutouts. Same proportions as the official Reddit brand
+ * mark; derived from the skill-icons Reddit PR.
+ */
+export function RedditLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <circle cx="12" cy="12" r="12" fill="#FF4500" />
+      <path
+        fill="#fff"
+        d="M20 12c0-.97-.79-1.76-1.76-1.76-.47 0-.9.19-1.21.49-1.2-.86-2.84-1.41-4.66-1.48l.79-3.73 2.6.55c.03.66.57 1.18 1.24 1.18.68 0 1.24-.55 1.24-1.24 0-.68-.55-1.24-1.24-1.24-.48 0-.9.28-1.1.69l-2.9-.62a.27.27 0 0 0-.32.2l-.88 4.13c-1.84.05-3.51.61-4.73 1.47A1.76 1.76 0 0 0 4 12c0 .73.45 1.36 1.08 1.62-.03.18-.04.37-.04.56C5.04 16.99 8.16 19 12 19s6.96-2.01 6.96-4.82c0-.19-.01-.38-.04-.56A1.76 1.76 0 0 0 20 12zm-11.5 1.25c0-.69.56-1.25 1.25-1.25s1.25.56 1.25 1.25-.56 1.25-1.25 1.25-1.25-.56-1.25-1.25zm6.74 3.25c-.83.83-2.41.9-2.87.9-.47 0-2.05-.06-2.87-.9a.31.31 0 0 1 0-.44.31.31 0 0 1 .44 0c.52.52 1.64.71 2.43.71.79 0 1.91-.18 2.43-.71a.31.31 0 0 1 .44 0 .31.31 0 0 1 0 .44zm-.24-2c-.69 0-1.25-.56-1.25-1.25s.56-1.25 1.25-1.25 1.25.56 1.25 1.25-.56 1.25-1.25 1.25z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Hacker News "Y" mark — orange square with white "Y".
+ */
+export function HackerNewsLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <rect width="24" height="24" rx="3" fill="#FF6600" />
+      <path
+        fill="#fff"
+        d="M9.4 6h2.2l1.4 3.2L14.4 6h2.2l-2.6 5.5V18h-2.4v-6.5z"
+      />
+    </svg>
+  );
+}
+
+/** SEO — emerald→teal gradient with a magnifier-on-bars glyph. */
+export function SeoLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <defs>
+        <linearGradient id="seo-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#34D399" />
+          <stop offset="100%" stopColor="#0D9488" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="6" fill="url(#seo-grad)" />
+      <path
+        d="M7 17V11.5M11 17V8M15 17V13.5"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <circle cx="16.5" cy="8.5" r="2.2" stroke="#fff" strokeWidth="1.6" fill="none" />
+      <path d="m18.2 10.2 1.4 1.4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** GEO — violet/fuchsia/indigo gradient with a sparkle. */
+export function GeoLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <defs>
+        <linearGradient id="geo-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#A78BFA" />
+          <stop offset="55%" stopColor="#E879F9" />
+          <stop offset="100%" stopColor="#6366F1" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="6" fill="url(#geo-grad)" />
+      <path
+        fill="#fff"
+        d="M12 5.6 13.5 10 18 11.5 13.5 13 12 17.4 10.5 13 6 11.5 10.5 10z"
+      />
+      <circle cx="17" cy="6.6" r="1.1" fill="#fff" opacity="0.85" />
+      <circle cx="6.5" cy="17.6" r="0.9" fill="#fff" opacity="0.75" />
+    </svg>
+  );
+}
+
+/** Content Writer — amber→orange gradient with a quill/pen. */
+export function ContentLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <defs>
+        <linearGradient id="content-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FBBF24" />
+          <stop offset="100%" stopColor="#F97316" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="6" fill="url(#content-grad)" />
+      <path
+        d="M7 17 17 7M14 6l4 4M7 17v-2.5l7.5-7.5"
+        stroke="#fff"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path d="M7 17h2.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Backlink Marketplace — blue→cyan gradient with two linked rings. */
+export function BacklinkLogo({ className }: LogoProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden focusable="false">
+      <defs>
+        <linearGradient id="backlink-grad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#38BDF8" />
+          <stop offset="100%" stopColor="#2563EB" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="6" fill="url(#backlink-grad)" />
+      <path
+        d="M9.2 13.6 7.4 15.4a2.7 2.7 0 0 1-3.8-3.8l2.4-2.4a2.7 2.7 0 0 1 3.8 0M14.8 10.4l1.8-1.8a2.7 2.7 0 0 1 3.8 3.8l-2.4 2.4a2.7 2.7 0 0 1-3.8 0M9.6 14.4l4.8-4.8"
+        stroke="#fff"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+/** Reddit Sales — same Snoo as RedditLogo but with a subtle background ring. */
+export const RedditSalesLogo = RedditLogo;

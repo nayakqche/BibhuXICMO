@@ -76,13 +76,6 @@ export const AGENT_META: Record<string, AgentMeta> = {
     description: "Founder-voice posts and engagement-driven thought leadership.",
     href: "/agents/linkedin",
   },
-  coding: {
-    id: "coding",
-    label: "Coding",
-    creditsApprox: 12,
-    description: "Open small dev PRs against your connected GitHub repo.",
-    href: "/agents/coding",
-  },
 };
 
 export function getAgentMeta(id: string): AgentMeta | undefined {

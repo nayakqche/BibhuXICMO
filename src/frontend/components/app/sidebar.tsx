@@ -9,23 +9,25 @@ import {
   FileText,
   Home,
   Layers,
-  Link2,
-  MessageCircle,
   MessageSquare,
-  Newspaper,
   Plug,
-  Search,
   Settings,
   Sparkles,
   TrendingUp,
 } from "lucide-react";
 import {
+  BacklinkLogo,
+  ContentLogo,
+  GeoLogo,
+  HackerNewsLogo,
   InstagramLogo,
   LinkedinLogo,
+  RedditLogo,
+  SeoLogo,
   XLogo,
   YoutubeLogo,
 } from "@/frontend/components/brand-logos";
-import { X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { cn } from "@/shared/utils";
 import { Logo } from "@/frontend/components/marketing/logo";
 import { ThemeToggle } from "@/frontend/components/ui/theme-toggle";
@@ -43,17 +45,16 @@ const MAIN = [
 ];
 
 const AGENTS = [
-  { href: "/agents/seo", label: "SEO", icon: Search },
-  { href: "/agents/geo", label: "GEO", icon: Sparkles },
-  { href: "/agents/content", label: "Content Writer", icon: FileText },
-  { href: "/agents/reddit-sales", label: "Reddit Sales", icon: MessageCircle },
-  { href: "/agents/hn", label: "Hacker News", icon: Newspaper },
+  { href: "/agents/seo", label: "SEO", icon: SeoLogo },
+  { href: "/agents/geo", label: "GEO", icon: GeoLogo },
+  { href: "/agents/content", label: "Content Writer", icon: ContentLogo },
+  { href: "/agents/reddit-sales", label: "Reddit Sales", icon: RedditLogo },
+  { href: "/agents/hn", label: "Hacker News", icon: HackerNewsLogo },
   { href: "/agents/x", label: "X / Twitter", icon: XLogo },
   { href: "/agents/linkedin", label: "LinkedIn", icon: LinkedinLogo },
-  // Influencer + backlink modules — UI stubs for now, backend coming next.
   { href: "/agents/youtube", label: "YT Creators", icon: YoutubeLogo },
   { href: "/agents/instagram", label: "Insta Influencers", icon: InstagramLogo },
-  { href: "/agents/backlink-marketplace", label: "Backlink Marketplace", icon: Link2 },
+  { href: "/agents/backlink-marketplace", label: "Backlink Marketplace", icon: BacklinkLogo },
 ];
 
 const DATA = [
@@ -76,7 +77,7 @@ export function Sidebar({
   workspaceId: string;
   plan: Plan;
 }) {
-  const { mobileOpen, close } = useSidebar();
+  const { mobileOpen, close, collapsed, toggleCollapsed } = useSidebar();
 
   return (
     <>
@@ -92,42 +93,73 @@ export function Sidebar({
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-screen w-64 shrink-0 flex-col border-r bg-background transition-transform duration-200 md:sticky md:top-0 md:translate-x-0 md:bg-muted/20",
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-50 flex h-screen shrink-0 flex-col border-r bg-background transition-[width,transform] duration-200 md:sticky md:top-0 md:translate-x-0 md:bg-muted/20",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          // Desktop width: collapsed = thin icon rail, expanded = 16rem.
+          collapsed ? "md:w-[68px]" : "md:w-64",
+          // Mobile drawer is always 16rem regardless of collapsed state.
+          "w-64"
         )}
         aria-label="Primary navigation"
+        data-collapsed={collapsed}
       >
-        <div className="flex h-16 items-center justify-between border-b px-6">
-          <Logo />
+        <div
+          className={cn(
+            "relative flex h-16 items-center border-b",
+            collapsed ? "justify-center px-2" : "justify-between px-6"
+          )}
+        >
+          <Logo showWordmark={!collapsed} />
           <button
             type="button"
             onClick={close}
-            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+            className="absolute right-3 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
             aria-label="Close menu"
           >
             <X className="h-4 w-4" />
           </button>
+          {/* Desktop collapse toggle (floating chip on the right border). */}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="absolute -right-3 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground md:flex"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            )}
+          </button>
         </div>
 
-        <div className="border-b">
-          <WorkspaceSwitcher
-            current={{ id: workspaceId, name: workspaceName, plan }}
-            others={[]}
-          />
-        </div>
+        {!collapsed ? (
+          <div className="border-b">
+            <WorkspaceSwitcher
+              current={{ id: workspaceId, name: workspaceName, plan }}
+              others={[]}
+            />
+          </div>
+        ) : null}
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <Section items={MAIN} />
-          <SectionTitle>Agents</SectionTitle>
-          <Section items={AGENTS} icon={Bot} />
-          <SectionTitle>Data</SectionTitle>
-          <Section items={DATA} />
-          <SectionTitle>Workspace</SectionTitle>
-          <Section items={SETTINGS} />
+        <nav className={cn("flex-1 overflow-y-auto py-4", collapsed ? "px-2" : "px-3")}>
+          <Section items={MAIN} collapsed={collapsed} />
+          <SectionTitle collapsed={collapsed}>Agents</SectionTitle>
+          <Section items={AGENTS} icon={Bot} collapsed={collapsed} />
+          <SectionTitle collapsed={collapsed}>Data</SectionTitle>
+          <Section items={DATA} collapsed={collapsed} />
+          <SectionTitle collapsed={collapsed}>Workspace</SectionTitle>
+          <Section items={SETTINGS} collapsed={collapsed} />
         </nav>
 
-        <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
-          <span>Theme</span>
+        <div
+          className={cn(
+            "flex items-center border-t py-3 text-xs text-muted-foreground",
+            collapsed ? "justify-center px-2" : "justify-between px-4"
+          )}
+        >
+          {!collapsed ? <span>Theme</span> : null}
           <ThemeToggle />
         </div>
       </aside>
@@ -135,7 +167,16 @@ export function Sidebar({
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({
+  children,
+  collapsed,
+}: {
+  children: React.ReactNode;
+  collapsed?: boolean;
+}) {
+  if (collapsed) {
+    return <div className="mt-4 pt-2" aria-hidden />;
+  }
   return (
     <div className="mt-4 px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
@@ -146,9 +187,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Section({
   items,
   icon: DefaultIcon,
+  collapsed,
 }: {
   items: { href: string; label: string; icon: React.ElementType }[];
   icon?: React.ElementType;
+  collapsed?: boolean;
 }) {
   const pathname = usePathname();
   return (
@@ -161,15 +204,21 @@ function Section({
           <li key={item.href}>
             <Link
               href={item.href}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                "flex items-center rounded-md text-sm transition-colors",
+                collapsed
+                  ? "h-9 w-full justify-center px-0"
+                  : "gap-2 px-3 py-1.5",
                 active
                   ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
               )}
             >
-              <Icon className="h-4 w-4" />
-              <span className="flex-1 truncate">{item.label}</span>
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed ? (
+                <span className="flex-1 truncate">{item.label}</span>
+              ) : null}
             </Link>
           </li>
         );

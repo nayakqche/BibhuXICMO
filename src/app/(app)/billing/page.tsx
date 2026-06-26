@@ -86,7 +86,6 @@ export default async function BillingPage() {
                 "Reddit + X + LinkedIn publishing",
                 "GSC + GA4 integrations",
                 "GEO score tracking",
-                "Coding Agent (GitHub PRs)",
                 "Priority support",
               ].map((f) => (
                 <li key={f} className="flex items-start gap-2 text-sm">
