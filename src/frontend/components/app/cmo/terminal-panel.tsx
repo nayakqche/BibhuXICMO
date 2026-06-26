@@ -39,20 +39,20 @@ export function TerminalPanel({
   return (
     <Card
       className={
-        "border-emerald-500/20 bg-zinc-950 font-mono text-[13px] text-zinc-100 " +
+        "border-emerald-500/20 bg-zinc-950 font-mono text-[11px] text-zinc-100 " +
         (className ?? "")
       }
     >
-      <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
-        <Terminal className="h-4 w-4 text-emerald-400" aria-hidden />
-        <span className="text-xs uppercase tracking-wider text-zinc-400">
+      <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
+        <Terminal className="h-3 w-3 text-emerald-400" aria-hidden />
+        <span className="text-[10px] uppercase tracking-wider text-zinc-400">
           Live agent log
         </span>
-        <span className="ml-auto inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+        <span className="ml-auto inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
       </div>
       <CardContent
         ref={containerRef}
-        className={`${maxHeightClass} space-y-1 overflow-y-auto py-3 text-zinc-300`}
+        className={`${maxHeightClass} space-y-0.5 overflow-y-auto px-3 py-2 text-zinc-300`}
       >
         {finalLines.slice(0, shown).map((line, i) => (
           <div key={i} className="leading-relaxed">

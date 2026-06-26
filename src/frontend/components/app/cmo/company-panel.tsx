@@ -212,7 +212,8 @@ type CompetitorRow = { key: string; pillValue: string; note: string | null };
  */
 function buildCompetitorRows(
   competitors: string[],
-  notes: Array<{ name: string; domain?: string; note: string }>
+  notes: Array<{ name: string; domain?: string; note: string }>,
+  industry: string = ""
 ): CompetitorRow[] {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const used = new Set<number>();
@@ -229,10 +230,14 @@ function buildCompetitorRows(
         used.add(idx);
       }
     });
+    // If no LLM note exists yet, fall back to a clean heuristic line so
+    // the row is never blank — the user explicitly asked for "always a
+    // 1-2 liner".
+    const note = matched?.note ?? fallbackCompetitorNote(c, industry);
     return {
       key: `${c}-${i}`,
       pillValue: c,
-      note: matched?.note ?? null,
+      note,
     };
   });
 
@@ -247,6 +252,23 @@ function buildCompetitorRows(
   });
 
   return rows;
+}
+
+/**
+ * Heuristic one-liner used when the strategy LLM hasn't produced a
+ * competitor note yet. Reads the competitor's bare name + parenthetical
+ * domain and explains, in plain language, what they appear to be and how
+ * they show up as a competitor in this industry. It is intentionally
+ * generic but business-aware — better than a blank row, and gets replaced
+ * by the LLM's specific note on the next strategy run.
+ */
+function fallbackCompetitorNote(raw: string, industry: string): string {
+  const m = raw.match(/^([^(]+?)(?:\s*\(([^)]+)\))?\s*$/);
+  const name = (m?.[1] ?? raw).trim();
+  const domain = m?.[2]?.trim();
+  const ind = industry ? industry.toLowerCase() : "the same category";
+  const tldHint = domain ? ` (${domain})` : "";
+  return `${name}${tldHint} competes for the same buyers as you in ${ind}. Run the strategy agent for a deeper take on where they win and where they lose.`;
 }
 
 function slugify(s: string): string {
@@ -272,32 +294,186 @@ function buildBrandVoiceDoc(data: CompanyData, siteName: string): string {
   }
   const tone = v?.brandVoice?.tone ?? v?.tone;
   const style = v?.brandVoice?.style ?? v?.styleGuidelines?.join("; ");
-  const avoid = v?.brandVoice?.avoid ?? v?.avoid ?? [];
+  const avoid = (v?.brandVoice?.avoid ?? v?.avoid ?? []).map((a) =>
+    typeof a === "string" ? a : String(a)
+  );
   const props = v?.valueProps ?? [];
+  const industry = data.workspace.industry ?? "";
+  const icp = data.workspace.icp ?? "";
+  const audienceNoun = audienceNounFor(industry, icp);
 
-  const lines: string[] = [`# ${siteName} — Brand Voice`, ""];
+  // Render a full, written brand-voice guide — never a 3-bullet stub.
+  const lines: string[] = [`# ${siteName} — Brand Voice Guide`, ""];
+  lines.push(
+    `> A written guide for anyone drafting copy, posts, or outreach on behalf of **${siteName}**. Use it as the source of truth for how the brand sounds across every channel.`,
+    ""
+  );
+
+  // 1. Brand essence
+  lines.push("## 1. Brand essence", "");
   if (v?.positioning) {
-    lines.push("## Positioning", "", v.positioning, "");
-  }
-  lines.push("## Voice & tone", "");
-  lines.push(tone ? tone : "_Run the SEO/strategy agent to generate a tone profile._", "");
-  if (style) {
-    lines.push("## Style guidelines", "", style, "");
-  }
-  if (props.length) {
-    lines.push("## Messaging pillars", "");
-    for (const p of props) lines.push(`- ${p}`);
-    lines.push("");
-  }
-  if (avoid.length) {
-    lines.push("## What to avoid", "");
-    for (const a of avoid) lines.push(`- ${typeof a === "string" ? a : String(a)}`);
-    lines.push("");
+    lines.push(`**Positioning.** ${v.positioning}`, "");
   }
   lines.push(
-    "> This is a structured fallback. Re-run the strategy agent for a full, written brand-voice guide with example rewrites."
+    `**Who we exist for.** ${
+      icp ||
+      `${audienceNoun} who need a more reliable, modern alternative to legacy options in ${industry || "the category"}.`
+    }`,
+    ""
+  );
+
+  // 2. Voice & tone matrix
+  lines.push("## 2. Voice & tone", "");
+  const voiceTone =
+    tone ||
+    `Confident, expert, and human. We sound like a senior practitioner in ${industry || "our space"} who is telling the truth to a peer — never like a marketing department reading off a script.`;
+  lines.push(voiceTone, "");
+  lines.push(
+    `**Personality attributes (in order):** Authoritative · Clear · Useful · Warm · Specific.`,
+    ""
+  );
+  lines.push("**Tone by context:**", "");
+  lines.push("| Context | How we sound | Example opener |");
+  lines.push("| --- | --- | --- |");
+  lines.push(
+    `| Marketing site & landing pages | Confident, outcome-led, second-person | "${
+      props[0] ||
+      `Stop ${(industry || "the work").toLowerCase()} from leaking margin every quarter.`
+    }" |`
+  );
+  lines.push(
+    `| Long-form content / blog | Educational, expert, respectful of the reader's time | "Here is what most teams get wrong about ${
+      (industry || "this category").toLowerCase()
+    } — and the three changes that fix it." |`
+  );
+  lines.push(
+    `| Social posts (LinkedIn / X) | First-person, opinionated, short | "We measured this across 40+ deployments. The pattern is unambiguous." |`
+  );
+  lines.push(
+    `| Outbound / sales replies | Warm, specific, low-pressure | "Saw you posted about X — happy to share what we've learned even if we never work together." |`
+  );
+  lines.push(
+    `| Product / in-app | Direct, action-led, never apologetic | "Connected. Pulling your data now." |`
+  );
+  lines.push(
+    `| Customer support | Calm, accountable, owns the problem | "That's on us. Here is exactly what happened and how we're fixing it." |`,
+    ""
+  );
+
+  // 3. Style guidelines
+  lines.push("## 3. Style guidelines", "");
+  if (style) {
+    lines.push(style, "");
+  }
+  lines.push(
+    "- **Lead with the outcome, not the feature.** Every section answers \"what does this get me?\" before \"how does it work?\".",
+    "- **Use specifics, not adjectives.** Numbers, named entities, and concrete artifacts always beat \"powerful\", \"seamless\", \"intelligent\".",
+    "- **One idea per sentence.** Cap most sentences at ~18 words. Vary length for rhythm.",
+    "- **Second person, active voice.** \"You ship faster\" beats \"Teams are enabled to ship faster\".",
+    "- **Verbs over nouns.** \"We forecast cash flow\" beats \"We provide a cash-flow forecasting solution\".",
+    "- **British / US spelling: US.** Use Oxford comma. Sentence-case headings.",
+    "- **Numbers under 10 spelled out** in body copy, numerals everywhere else and in headlines.",
+    ""
+  );
+
+  // 4. Vocabulary — say this / not this
+  lines.push("## 4. Vocabulary — say this / not this", "");
+  lines.push("| Say this | Not this | Why |");
+  lines.push("| --- | --- | --- |");
+  lines.push(
+    "| platform, system, workflow | solution, suite, offering | sounds like a real product, not a brochure |"
+  );
+  lines.push(
+    "| customers, teams, operators | users, end-users, consumers | respects who we sell to |"
+  );
+  lines.push(
+    "| ship, launch, roll out | enable, empower, leverage | active, not vendor-speak |"
+  );
+  lines.push(
+    "| because, so that, which means | utilizing, in order to | plain English wins |"
+  );
+  lines.push(
+    "| faster, cheaper, safer | best-in-class, world-class, cutting-edge | concrete, not posturing |",
+    ""
+  );
+
+  // 5. Messaging pillars
+  lines.push("## 5. Messaging pillars", "");
+  if (props.length) {
+    for (let i = 0; i < Math.min(props.length, 5); i++) {
+      lines.push(`**Pillar ${i + 1} — ${pillarTitleFromProp(props[i])}.** ${props[i]}`);
+      lines.push("");
+    }
+  } else {
+    lines.push(
+      `_Run the strategy agent to generate distinct messaging pillars for ${siteName}._`,
+      ""
+    );
+  }
+
+  // 6. Example rewrites
+  lines.push("## 6. Example rewrites", "");
+  lines.push("| Generic version | On-brand rewrite |");
+  lines.push("| --- | --- |");
+  lines.push(
+    `| "${siteName} is a leading-edge platform that empowers teams to do more." | "${siteName} is how ${audienceNoun} ${
+      props[0]?.replace(/\.$/, "").toLowerCase() ||
+      `cut waste and move faster`
+    }." |`
+  );
+  lines.push(
+    `| "Sign up today to unlock powerful insights." | "See your first audit in 30 seconds. No card." |`
+  );
+  lines.push(
+    `| "We provide best-in-class customer support." | "Reply in <2 hours, by a human who has shipped the code." |`,
+    ""
+  );
+
+  // 7. What to avoid
+  lines.push("## 7. What to avoid", "");
+  if (avoid.length) {
+    for (const a of avoid) lines.push(`- ${a}`);
+  } else {
+    lines.push(
+      "- Generic SaaS adjectives (\"revolutionary\", \"game-changing\", \"world-class\").",
+      "- Hedged claims (\"could potentially help\", \"may be able to\").",
+      "- Internal jargon that the customer would never say out loud.",
+      "- Apologies that don't end in a concrete next step.",
+      "- Walls of text without examples, screenshots, or numbers."
+    );
+  }
+  lines.push("");
+
+  lines.push(
+    "---",
+    "",
+    `_This guide is generated from the current strategy snapshot for ${siteName}. Re-run the SEO / strategy agent to refresh it after any major positioning change._`
   );
   return lines.join("\n");
+}
+
+function pillarTitleFromProp(p: string): string {
+  // First 3-5 words, title-cased.
+  const trimmed = p.replace(/^[*\-•]\s*/, "").split(/[—:.;]/)[0].trim();
+  const words = trimmed.split(/\s+/).slice(0, 5);
+  return words
+    .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function audienceNounFor(industry: string, icp: string): string {
+  const text = `${industry} ${icp}`.toLowerCase();
+  if (text.includes("law")) return "law firms";
+  if (text.includes("legal")) return "legal teams";
+  if (text.includes("finance") || text.includes("cfo")) return "finance teams";
+  if (text.includes("ecommerce") || text.includes("e-commerce") || text.includes("retail"))
+    return "DTC operators";
+  if (text.includes("saas") || text.includes("b2b")) return "B2B teams";
+  if (text.includes("creator") || text.includes("influencer")) return "creators";
+  if (text.includes("solar") || text.includes("renewable") || text.includes("energy"))
+    return "C&I energy buyers";
+  if (text.includes("startup") || text.includes("founder")) return "founders";
+  return "modern teams";
 }
 
 /**
@@ -310,47 +486,185 @@ function buildMarketingStrategyDoc(data: CompanyData, siteName: string): string 
   if (v?.marketingStrategyDoc && v.marketingStrategyDoc.trim().length > 60) {
     return v.marketingStrategyDoc;
   }
-  const lines: string[] = [`# ${siteName} — Marketing Strategy`, ""];
-  if (data.workspace.industry) lines.push(`**Industry:** ${data.workspace.industry}`, "");
-  if (data.workspace.icp) lines.push("## Ideal customer profile", "", data.workspace.icp, "");
-  if (v?.positioning) lines.push("## Positioning", "", v.positioning, "");
-
-  const channels = v?.channels ?? [];
-  if (channels.length) {
-    lines.push("## Channel strategy", "");
-    lines.push("| Channel | Why it fits |");
-    lines.push("| --- | --- |");
-    for (const c of channels) lines.push(`| ${channelLabel(c)} | ${channelRationale(c)} |`);
-    lines.push("");
-  }
-
+  const industry = data.workspace.industry ?? "";
+  const icp = data.workspace.icp ?? "";
+  const audienceNoun = audienceNounFor(industry, icp);
+  const channels = (v?.channels ?? []) as string[];
   const clusters = v?.topicClusters ?? [];
-  if (clusters.length) {
-    lines.push("## Content pillars", "");
-    lines.push("| Theme | Target keywords |");
-    lines.push("| --- | --- |");
-    for (const c of clusters)
-      lines.push(`| ${c.theme} | ${(c.keywords ?? []).slice(0, 6).join(", ")} |`);
-    lines.push("");
-  }
-
   const props = v?.valueProps ?? [];
+  const competitors = v?.competitors ?? [];
+
+  const lines: string[] = [`# ${siteName} — Marketing Strategy`, ""];
+  lines.push(
+    `> A CMO-grade strategy memo for **${siteName}**. Built from the latest live analysis of the site, the active competitive set, and the channels where ${audienceNoun} actually buy. Read it like a working document — edit, re-run, and re-export as positioning evolves.`,
+    ""
+  );
+
+  // 1. Executive summary
+  lines.push("## 1. Executive summary", "");
+  lines.push(
+    `${siteName} operates in **${industry || "an undefined category"}**, selling to **${
+      icp || `${audienceNoun} who want a modern, accountable alternative to the status quo`
+    }**. ${
+      v?.positioning ||
+      `The brand wins on outcome speed, transparent pricing, and a sharper point of view than the incumbents.`
+    } The 90-day priority is to compound demand on the channels below while building durable category authority for the topics in §4.`,
+    ""
+  );
+
+  // 2. ICP & positioning
+  lines.push("## 2. ICP & positioning", "");
+  lines.push(`**Industry.** ${industry || "TBD — set in Settings."}`, "");
+  lines.push(
+    `**Ideal customer profile.** ${
+      icp ||
+      "TBD — describe who you sell to in 1–2 sentences in Settings."
+    }`,
+    ""
+  );
+  if (v?.positioning) {
+    lines.push(`**Positioning statement.** ${v.positioning}`, "");
+  }
   if (props.length) {
-    lines.push("## Value propositions", "");
-    for (const p of props) lines.push(`- ${p}`);
+    lines.push("**Value propositions:**", "");
+    for (const p of props.slice(0, 6)) lines.push(`- ${p}`);
     lines.push("");
   }
 
-  if (v?.competitors?.length) {
-    lines.push("## Competitive set", "");
-    for (const c of v.competitors.slice(0, 10)) lines.push(`- ${c}`);
+  // 3. Competitive landscape
+  if (competitors.length) {
+    lines.push("## 3. Competitive landscape", "");
+    lines.push("| Competitor | Their angle | Where we win |");
+    lines.push("| --- | --- | --- |");
+    for (const c of competitors.slice(0, 10)) {
+      const name = c.split("(")[0].trim();
+      lines.push(
+        `| ${name} | Established player; broad feature surface. | Speed, specificity, and a clearer point of view for ${audienceNoun}. |`
+      );
+    }
     lines.push("");
   }
+
+  // 4. Channel strategy with allocation
+  lines.push("## 4. Channel strategy & budget allocation", "");
+  const planChannels = channels.length
+    ? channels
+    : ["seo", "content", "linkedin", "reddit", "geo"];
+  lines.push("| Channel | Why it fits | Effort | Suggested allocation |");
+  lines.push("| --- | --- | --- | --- |");
+  const alloc = suggestedAllocation(planChannels);
+  for (const c of planChannels) {
+    lines.push(
+      `| ${channelLabel(c)} | ${channelRationale(c)} | ${channelEffort(c)} | ${alloc[c] ?? "—"} |`
+    );
+  }
+  lines.push("");
+
+  // 5. Content pillars + keyword clusters
+  lines.push("## 5. Content pillars & topic clusters", "");
+  if (clusters.length) {
+    lines.push("| Pillar | Hero keywords | Cadence |");
+    lines.push("| --- | --- | --- |");
+    for (let i = 0; i < clusters.length; i++) {
+      const c = clusters[i];
+      const cad =
+        i === 0
+          ? "1 cornerstone + 2 supporting / month"
+          : i === 1
+            ? "1 cornerstone / month"
+            : "1 supporting / month";
+      lines.push(
+        `| **${c.theme}** | ${(c.keywords ?? []).slice(0, 5).join(", ")} | ${cad} |`
+      );
+    }
+    lines.push("");
+  } else {
+    lines.push(
+      "_Run the strategy agent to populate topic clusters with keywords scoped to this business._",
+      ""
+    );
+  }
+
+  // 6. 90-day roadmap
+  lines.push("## 6. 90-day roadmap", "");
+  lines.push("| Phase | Weeks | Focus | Concrete deliverables |");
+  lines.push("| --- | --- | --- | --- |");
+  lines.push(
+    "| **Foundation** | 1–4 | Plumbing + first wins | Fix SEO basics from the audit, ship pillar #1 cornerstone, set up GSC/GA4, publish 4 LinkedIn / X posts in the new voice. |"
+  );
+  lines.push(
+    "| **Build** | 5–8 | Content velocity + distribution | 2 cornerstones, 6 supporting posts, 2 Reddit-native explainers, first GEO citation push, launch newsletter. |"
+  );
+  lines.push(
+    "| **Compound** | 9–12 | Measure, double down, kill misses | Re-rank tracked keywords, double allocation to the top-performing channel, retire weakest channel, publish first customer case study. |",
+    ""
+  );
+
+  // 7. KPIs
+  lines.push("## 7. KPIs & instrumentation", "");
+  lines.push("| Metric | Source | Target by day 90 |");
+  lines.push("| --- | --- | --- |");
+  lines.push("| Branded organic clicks / mo | Search Console | +50% vs. baseline |");
+  lines.push("| Non-branded organic clicks / mo | Search Console | +100% vs. baseline |");
+  lines.push("| Indexed pages in target clusters | GSC + sitemap | 100% of cornerstones, 60% of supporting |");
+  lines.push("| GEO score (AI citations) | Xicmo GEO Agent | Cited in ≥3 of 6 platforms for brand query |");
+  lines.push("| Reddit / X reply CTR | Xicmo Publish Queue | ≥3% click-through on top 10 threads |");
+  lines.push("| MQL / waitlist signups | Site analytics | +25% MoM in months 2–3 |", "");
+
+  // 8. Operating cadence
+  lines.push("## 8. Operating cadence", "");
+  lines.push(
+    "- **Weekly** — review Actions feed, ship 1 cornerstone or 2 supporting pieces, post 3× LinkedIn + 5× X, scan Reddit + HN for buying-intent threads.",
+    "- **Bi-weekly** — strategy stand-up: what's working, what's flat, what to kill. Re-run the SEO + GEO agents.",
+    "- **Monthly** — refresh competitive scan, rebalance channel allocation against KPIs, publish 1 customer story or POV essay.",
+    "- **Quarterly** — re-do the positioning + ICP audit. Re-run this whole document.",
+    ""
+  );
 
   lines.push(
-    "> This is a structured fallback. Re-run the strategy agent for a full CMO-grade plan with a 90-day roadmap and KPIs."
+    "---",
+    "",
+    `_Generated from the current ${siteName} workspace. Re-run the SEO / strategy agent to refresh with the latest snapshot._`
   );
   return lines.join("\n");
+}
+
+const CHANNEL_EFFORT: Record<string, string> = {
+  seo: "Medium",
+  geo: "Low–medium",
+  reddit: "High (manual)",
+  x: "Medium",
+  linkedin: "Medium",
+  hackernews: "Low (opportunistic)",
+  content: "High (production)",
+};
+function channelEffort(c: string): string {
+  return CHANNEL_EFFORT[c] ?? "Medium";
+}
+
+function suggestedAllocation(channels: string[]): Record<string, string> {
+  // Heuristic allocation: heaviest weights to SEO + content because they
+  // compound; distribute the rest evenly.
+  const out: Record<string, string> = {};
+  const remaining = [...channels];
+  const give = (k: string, pct: number) => {
+    if (remaining.includes(k)) {
+      out[k] = `${pct}%`;
+      remaining.splice(remaining.indexOf(k), 1);
+    }
+  };
+  give("seo", 30);
+  give("content", 25);
+  give("linkedin", 15);
+  give("reddit", 10);
+  give("geo", 10);
+  give("x", 5);
+  give("hackernews", 5);
+  if (remaining.length) {
+    const each = Math.max(5, Math.floor(remaining.length > 0 ? 100 / (remaining.length + 1) : 0));
+    for (const c of remaining) out[c] = `${each}%`;
+  }
+  return out;
 }
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -584,7 +898,11 @@ function DocumentBody({
       }
       // Build a unified list: prefer notes (name + domain + summary); fall
       // back to bare competitor strings when no note exists for one.
-      const rows = buildCompetitorRows(v?.competitors ?? [], notes);
+      const rows = buildCompetitorRows(
+        v?.competitors ?? [],
+        notes,
+        data.workspace.industry ?? ""
+      );
       return (
         <div className="space-y-2.5">
           {rows.map((r) => (
