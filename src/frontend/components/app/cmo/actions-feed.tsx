@@ -34,7 +34,8 @@ import type { ActionLite } from "@/backend/agents/cmo-data";
 
 type GroupId =
   | "reddit"
-  | "seo-geo"
+  | "seo"
+  | "geo"
   | "x"
   | "articles"
   | "hn"
@@ -42,12 +43,13 @@ type GroupId =
   | "other";
 
 const GROUP_ORDER: GroupId[] = [
+  "seo",
+  "geo",
   "reddit",
-  "seo-geo",
   "x",
+  "linkedin",
   "articles",
   "hn",
-  "linkedin",
   "other",
 ];
 
@@ -70,11 +72,17 @@ const GROUP_META: Record<
     unit: "opportunity",
     maxOnly: true,
   },
-  "seo-geo": {
-    label: "SEO & GEO recommendations",
+  seo: {
+    label: "SEO recommendations",
     icon: TrendingUp,
     cta: "Fix",
-    unit: "recommendation",
+    unit: "fix",
+  },
+  geo: {
+    label: "GEO recommendations",
+    icon: Sparkles,
+    cta: "See analysis",
+    unit: "insight",
   },
   x: { label: "X writer", icon: Hash, cta: "Post", unit: "idea" },
   articles: { label: "Articles", icon: FileText, cta: "Open", unit: "topic" },
@@ -192,20 +200,8 @@ function agentBrand(agent: string): AgentBrand {
   return AGENT_BRANDS[agent.toLowerCase()] ?? DEFAULT_BRAND;
 }
 
-/**
- * Pick a brand visual for the group header. "seo-geo" gets a special
- * dual-stop violet→emerald gradient that mixes both categories; others
- * fall back to the most representative single-agent brand.
- */
+/** Pick a brand visual for the group header — one per agent now. */
 function groupBrand(group: GroupId): AgentBrand {
-  if (group === "seo-geo") {
-    return {
-      label: "SEO & GEO",
-      icon: TrendingUp,
-      tileBg: "bg-gradient-to-br from-emerald-500 via-teal-500 to-violet-600",
-      textAccent: "text-primary",
-    };
-  }
   if (group === "articles") return agentBrand("content");
   if (group === "other") return DEFAULT_BRAND;
   return agentBrand(group);
@@ -491,7 +487,8 @@ function PriorityPill({ p }: { p: string }) {
 function groupKey(agent: string): GroupId {
   const a = agent.toLowerCase();
   if (a === "reddit") return "reddit";
-  if (a === "seo" || a === "geo") return "seo-geo";
+  if (a === "seo") return "seo";
+  if (a === "geo") return "geo";
   if (a === "x" || a === "twitter") return "x";
   if (a === "linkedin") return "linkedin";
   if (a === "content") return "articles";
