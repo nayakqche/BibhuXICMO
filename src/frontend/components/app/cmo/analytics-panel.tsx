@@ -9,6 +9,7 @@ import {
   BarChart3,
   CheckCircle2,
   ExternalLink,
+  FileText,
   Globe,
   Image as ImageIcon,
   Link2,
@@ -750,7 +751,7 @@ function AiGeoTab({ data }: { data: CmoData }) {
       {data.topKeywords.length > 0 ? (
         <div>
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Tracked keywords
+            Tracked queries
           </div>
           <ul className="flex flex-wrap gap-1.5">
             {data.topKeywords.map((k) => (
@@ -765,19 +766,198 @@ function AiGeoTab({ data }: { data: CmoData }) {
             ))}
           </ul>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          No tracked keywords yet. Run the SEO or GEO agent to seed opportunities.
-        </p>
-      )}
+      ) : null}
+
+      {/* Site Files — crawler / AI accessibility configuration. */}
+      <SiteFilesSection files={data.siteFiles ?? []} />
+
+      {/* GEO checklist — citation-readiness signals for LLMs. */}
+      <GeoChecklistSection data={data} />
 
       <div className="rounded-md border bg-muted/20 p-3 text-xs leading-relaxed text-muted-foreground">
         <Sparkles className="mr-1 inline h-3.5 w-3.5 text-primary" aria-hidden />
-        GEO measures how often LLMs cite your brand. Run the GEO agent regularly for a
-        measured score — the box above is an AI preview from your homepage only.
+        GEO measures how often LLMs cite your brand. The checklist above shows how
+        ready your site is to BE cited; run the GEO agent for a measured citation score.
       </div>
     </div>
   );
+}
+
+function SiteFilesSection({
+  files,
+}: {
+  files: CmoData["siteFiles"];
+}) {
+  if (!files || files.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Site files
+      </div>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        Crawler and AI accessibility configuration.
+      </p>
+      <ul className="divide-y rounded-md border">
+        {files.map((f) => (
+          <li
+            key={f.name}
+            className="flex items-center justify-between gap-2 px-3 py-2 text-xs"
+          >
+            <span className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <code className="font-mono text-foreground">{f.name}</code>
+            </span>
+            <span className="flex items-center gap-2">
+              {f.present && f.sizeBytes != null ? (
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {formatBytes(f.sizeBytes)}
+                </span>
+              ) : null}
+              {f.present ? (
+                <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 font-semibold text-emerald-500">
+                  <CheckCircle2 className="h-3 w-3" /> Found
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 font-semibold text-amber-500">
+                  <AlertTriangle className="h-3 w-3" /> Missing
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {files.some((f) => f.name === "llms.txt" && !f.present) ? (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+          Tip: an <code className="font-mono">llms.txt</code> file tells AI crawlers
+          which pages matter most — a fast GEO win most sites still skip.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+type GeoSignal = { label: string; pass: boolean; hint?: string };
+
+function GeoChecklistSection({ data }: { data: CmoData }) {
+  const snap = data.liveSnapshot;
+  const files = data.siteFiles ?? [];
+  const fileOk = (n: string) => files.find((f) => f.name === n)?.present ?? false;
+
+  const signals: GeoSignal[] = [
+    {
+      label: "Structured data (Schema.org)",
+      pass: !!snap && Array.isArray(snap.jsonLd) && snap.jsonLd.length > 0,
+      hint: "Add JSON-LD (Organization, Product, FAQ) so LLMs can parse entities.",
+    },
+    {
+      label: "Descriptive title tag",
+      pass: !!snap && snap.title.trim().length >= 15 && snap.title.trim().length <= 65,
+      hint: "Keep the <title> between 15–65 chars and keyword-rich.",
+    },
+    {
+      label: "Meta description",
+      pass: !!snap && snap.description.trim().length >= 50,
+      hint: "Write a 120–160 char summary LLMs can quote.",
+    },
+    {
+      label: "Clear heading structure",
+      pass: !!snap && snap.h1.length === 1 && snap.h2.length >= 2,
+      hint: "Exactly one H1 and several descriptive H2s.",
+    },
+    {
+      label: "Sufficient content depth",
+      pass: !!snap && snap.wordCount >= 600,
+      hint: "Aim for 600+ words of substantive, citable copy.",
+    },
+    {
+      label: "Image alt text",
+      pass:
+        !!snap &&
+        snap.images.length > 0 &&
+        snap.images.filter((i) => i.alt && i.alt.trim()).length >=
+          Math.ceil(snap.images.length * 0.7),
+      hint: "Describe 70%+ of images so multimodal models understand them.",
+    },
+    {
+      label: "robots.txt present",
+      pass: fileOk("robots.txt"),
+      hint: "Publish robots.txt and don't block AI crawlers.",
+    },
+    {
+      label: "sitemap.xml present",
+      pass: fileOk("sitemap.xml"),
+      hint: "A sitemap helps crawlers find every citable page.",
+    },
+    {
+      label: "llms.txt present",
+      pass: fileOk("llms.txt"),
+      hint: "Add /llms.txt to point AI models at your key pages.",
+    },
+    {
+      label: "Social / Open Graph image",
+      pass: !!snap?.ogImage,
+      hint: "Set og:image so shares and AI cards render a preview.",
+    },
+  ];
+
+  const passed = signals.filter((s) => s.pass).length;
+
+  if (!snap) {
+    return (
+      <div className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+        Running the homepage scan… the GEO checklist populates once it finishes.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          GEO checklist
+        </div>
+        <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
+          {passed}/{signals.length}
+        </span>
+      </div>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        Citation-readiness signals for LLMs.
+      </p>
+      <ul className="divide-y rounded-md border">
+        {signals.map((s) => (
+          <li key={s.label} className="flex items-start gap-2 px-3 py-2 text-xs">
+            {s.pass ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-foreground">{s.label}</span>
+                <span
+                  className={
+                    "shrink-0 text-[10px] font-semibold uppercase " +
+                    (s.pass ? "text-emerald-500" : "text-amber-500")
+                  }
+                >
+                  {s.pass ? "Pass" : "Fix"}
+                </span>
+              </div>
+              {!s.pass && s.hint ? (
+                <p className="mt-0.5 leading-snug text-muted-foreground">{s.hint}</p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ChecksTab({ data }: { data: CmoData }) {

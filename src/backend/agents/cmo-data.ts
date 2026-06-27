@@ -192,6 +192,18 @@ export type CmoSlowData = {
   freshSeoScore: number | null;
   freshSeoIssues: SeoIssue[] | null;
   freshGeoScore: number | null;
+  /**
+   * Crawler / AI accessibility files probed directly over HTTP — drives the
+   * GEO tab's "Site Files" section (robots.txt, llms.txt, sitemap.xml).
+   */
+  siteFiles: SiteFileCheck[];
+};
+
+export type SiteFileCheck = {
+  name: string;
+  path: string;
+  present: boolean;
+  sizeBytes: number | null;
 };
 
 /** Combined view (used after both phases resolve). */
@@ -602,6 +614,9 @@ export async function loadCmoSlowData(args: {
     if (tasks.length) await Promise.all(tasks);
   }
 
+  // Probe crawler / AI-accessibility files for the GEO "Site Files" section.
+  const siteFiles = websiteUrl ? await probeSiteFiles(websiteUrl) : [];
+
   return {
     liveSnapshot,
     pageSpeed,
@@ -615,7 +630,58 @@ export async function loadCmoSlowData(args: {
     freshSeoScore,
     freshSeoIssues,
     freshGeoScore,
+    siteFiles,
   };
+}
+
+/**
+ * HEAD/GET the three files LLM crawlers look for. Bounded to 5s each and
+ * fully best-effort — a failed probe just reports the file as missing.
+ */
+async function probeSiteFiles(websiteUrl: string): Promise<SiteFileCheck[]> {
+  let origin: string;
+  try {
+    const u = websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`;
+    origin = new URL(u).origin;
+  } catch {
+    return [];
+  }
+  const targets: Array<{ name: string; path: string }> = [
+    { name: "robots.txt", path: "/robots.txt" },
+    { name: "llms.txt", path: "/llms.txt" },
+    { name: "sitemap.xml", path: "/sitemap.xml" },
+  ];
+  return Promise.all(
+    targets.map(async ({ name, path }) => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch(`${origin}${path}`, {
+          method: "GET",
+          redirect: "follow",
+          signal: ctrl.signal,
+          headers: { "user-agent": "XicmoBot/1.0 (+geo-audit)" },
+        });
+        clearTimeout(t);
+        if (!res.ok) {
+          return { name, path, present: false, sizeBytes: null };
+        }
+        const body = await res.text();
+        // Some hosts return a 200 HTML page for missing files — guard against
+        // that for robots/llms by requiring it not to look like a full doc.
+        const looksLikeHtml = /<html[\s>]/i.test(body.slice(0, 200));
+        const present = name === "sitemap.xml" ? true : !looksLikeHtml;
+        return {
+          name,
+          path,
+          present,
+          sizeBytes: present ? new TextEncoder().encode(body).length : null,
+        };
+      } catch {
+        return { name, path, present: false, sizeBytes: null };
+      }
+    })
+  );
 }
 
 function isVoiceEmpty(voice: CmoVoiceProfile | null): boolean {
