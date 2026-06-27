@@ -11,6 +11,7 @@ import {
   Hash,
   Home,
   Layers,
+  Link2,
   Linkedin,
   LogOut,
   MessageCircle,
@@ -58,6 +59,7 @@ const AGENTS = [
   { label: "Hacker News Agent", href: "/agents/hn", icon: Newspaper },
   { label: "X / Twitter Agent", href: "/agents/x", icon: Hash },
   { label: "LinkedIn Agent", href: "/agents/linkedin", icon: Linkedin },
+  { label: "Backlink Marketplace", href: "/agents/backlink-marketplace", icon: Link2 },
 ];
 
 export function CommandPalette({

@@ -2,6 +2,7 @@ import { requireWorkspace } from "@/backend/workspace";
 import { getBalance } from "@/backend/credits";
 import { AppShell } from "@/frontend/components/app/app-shell";
 import { getEffectivePlan } from "@/backend/plan";
+import { isAdminEmail } from "@/backend/admin";
 
 export default async function AppLayout({
   children,
@@ -15,6 +16,7 @@ export default async function AppLayout({
   const { user, workspace } = await requireWorkspace();
   const credits = await getBalance(workspace.id);
   const plan = getEffectivePlan(workspace.subscription);
+  const isAdmin = isAdminEmail(user.email);
 
   return (
     <AppShell
@@ -23,6 +25,7 @@ export default async function AppLayout({
       workspaceId={workspace.id}
       plan={plan}
       credits={credits}
+      isAdmin={isAdmin}
     >
       {children}
     </AppShell>

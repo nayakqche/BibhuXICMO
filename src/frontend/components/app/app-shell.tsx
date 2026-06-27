@@ -20,6 +20,7 @@ export function AppShell({
   workspaceId,
   plan,
   credits,
+  isAdmin = false,
   children,
 }: {
   user: { name: string | null; email: string; image: string | null };
@@ -27,6 +28,7 @@ export function AppShell({
   workspaceId: string;
   plan: Plan;
   credits: number;
+  isAdmin?: boolean;
   children: React.ReactNode;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -75,6 +77,7 @@ export function AppShell({
             workspaceName={workspaceName}
             workspaceId={workspaceId}
             plan={plan}
+            isAdmin={isAdmin}
           />
           <div className="flex min-w-0 flex-1 flex-col">
             <Topbar

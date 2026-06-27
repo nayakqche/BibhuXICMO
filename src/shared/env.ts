@@ -37,6 +37,31 @@ const envSchema = z.object({
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   STRIPE_PRICE_MAX_MONTHLY: z.string().optional(),
 
+  // ---------- Backlink marketplace payments ----------
+  /** Razorpay (premium backlink checkout). USD requires international payments enabled. */
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  NEXT_PUBLIC_RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  /** PayPal (premium backlink checkout). */
+  PAYPAL_CLIENT_ID: z.string().optional(),
+  PAYPAL_CLIENT_SECRET: z.string().optional(),
+  NEXT_PUBLIC_PAYPAL_CLIENT_ID: z.string().optional(),
+  PAYPAL_ENV: z.enum(["sandbox", "live"]).default("sandbox"),
+  /** Hostinger SMTP — outbound notifications (e.g. new paid backlink order). */
+  SMTP_HOST: z.string().default("smtp.hostinger.com"),
+  SMTP_PORT: z.coerce.number().default(465),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  /** Inbox that receives "new paid backlink order" notifications. */
+  BACKLINKS_NOTIFY_EMAIL: z.string().default("aadityasumanloyola@gmail.com"),
+  /**
+   * Comma-separated emails allowed to see the cross-workspace admin order view
+   * at /admin/backlink-orders. Falls back to BACKLINKS_NOTIFY_EMAIL when unset.
+   */
+  ADMIN_EMAILS: z.string().optional(),
+
   REDDIT_CLIENT_ID: z.string().optional(),
   REDDIT_CLIENT_SECRET: z.string().optional(),
   REDDIT_USER_AGENT: z.string().default("xicmo/0.1"),
