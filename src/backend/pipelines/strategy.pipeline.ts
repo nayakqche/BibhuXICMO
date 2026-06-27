@@ -46,16 +46,6 @@ export const strategySchema = z.object({
       })
     )
     .max(5),
-  brandVoiceDoc: z
-    .string()
-    .describe(
-      "A full, descriptive Brand Voice guide in Markdown (300-500 words). Use ## sections (Voice & tone, Personality, Vocabulary do/don't, Messaging pillars, Example rewrites). Include at least one Markdown table (e.g. Say this / Not this)."
-    ),
-  marketingStrategyDoc: z
-    .string()
-    .describe(
-      "A full, descriptive Marketing Strategy document in Markdown (500-900 words) like a real CMO would write. Use ## sections (ICP, Positioning, Channel strategy, Content pillars, 90-day plan, KPIs). Include at least two Markdown tables (e.g. a channel plan table and a 90-day roadmap table). Be specific to this business — no generic filler."
-    ),
   firstActions: z
     .array(
       z.object({
@@ -78,9 +68,7 @@ Hard requirements:
   Do NOT include http:// or www. — just the bare brand domain in parentheses. The domain MUST be the real, currently-live homepage domain (double-check it resolves) so the UI can render real logos. If you are unsure of the exact domain, pick a competitor whose domain you are certain of instead.
 - competitorNotes: for EACH competitor, add an entry with its name, bare domain, and a sharp 1-2 sentence note on what they do and how they compete vs. this business (their angle, who they target, where they're strong/weak). Be specific, not generic.
 - topicClusters: at least 1 cluster with 3+ keywords.
-- valueProps: 3-5 concrete prop sentences (no fluff).
-- brandVoiceDoc: write it like a senior brand strategist briefing a content team. Descriptive, specific to THIS business, with concrete example phrases and at least one Markdown table.
-- marketingStrategyDoc: write it like a real CMO's strategy memo. Deeply specific to this business and its ICP, with real channel allocation, content pillars, a 90-day roadmap, and KPIs. Use proper Markdown tables (at least two). Avoid generic SaaS filler — every line should be actionable for this exact company.`;
+- valueProps: 3-5 concrete prop sentences (no fluff).`;
 
 /**
  * Onboarding: fetch homepage → LLM structured strategy for workspace voice profile.
@@ -204,12 +192,6 @@ export class StrategyPipeline {
             : ["product", "features", "pricing"],
         },
       ],
-      // brandVoiceDoc + marketingStrategyDoc are required by the schema but
-      // we leave them empty in the fallback. The Company panel's
-      // buildBrandVoiceDoc / buildMarketingStrategyDoc helpers detect an
-      // empty doc and compose a structured fallback from the other fields.
-      brandVoiceDoc: "",
-      marketingStrategyDoc: "",
       firstActions: buildFallbackFirstActions(),
     };
   }
