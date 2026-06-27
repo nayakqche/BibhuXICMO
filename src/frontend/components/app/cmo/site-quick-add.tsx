@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, ExternalLink, Globe, Loader2, Pencil, X } from "lucide-react";
+import { SiteFavicon } from "@/frontend/components/app/cmo/site-favicon";
 import { toast } from "sonner";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
@@ -94,7 +95,7 @@ export function SiteQuickAdd({
     return (
       <div className="flex items-stretch gap-1.5 rounded-md border bg-card/40 p-1">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-muted/60">
-          <Globe className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          <SiteFavicon host={display} size={16} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col justify-center px-1">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">

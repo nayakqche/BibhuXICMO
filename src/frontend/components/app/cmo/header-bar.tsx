@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Pencil, Skull, Zap } from "lucide-react";
+import { Pencil, TerminalSquare, Zap } from "lucide-react";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
+import { SiteFavicon } from "@/frontend/components/app/cmo/site-favicon";
 import { SITE_NAME } from "@/shared/site";
 
 export function HeaderBar({
@@ -25,7 +26,7 @@ export function HeaderBar({
         className="group flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm font-medium transition-colors hover:border-primary/40 hover:bg-primary/5"
         title="Change website URL"
       >
-        <span className="text-muted-foreground">@</span>
+        <SiteFavicon host={host} size={16} />
         <span className="truncate" title={host}>
           {host}
         </span>
@@ -33,7 +34,7 @@ export function HeaderBar({
       </Link>
 
       <div className="flex items-center gap-2 text-sm">
-        <Skull className="h-4 w-4 text-muted-foreground" aria-hidden />
+        <TerminalSquare className="h-4 w-4 text-muted-foreground" aria-hidden />
         <span className="font-medium">{SITE_NAME} terminal</span>
         <Badge
           variant="outline"
