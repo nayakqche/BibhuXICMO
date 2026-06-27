@@ -112,7 +112,21 @@ async function AnalyticsPanelStreamed({
   workspaceId: string;
 }) {
   const slow = await loadSlow(fast, workspaceId);
-  return <AnalyticsPanel data={{ ...fast, ...slow }} />;
+  // If SEO/GEO were auto-run during the slow phase (brand-new site), merge
+  // the fresh scores + issues over the fast values so the Analytics panel's
+  // SEO score, GEO score and Checks tab populate on this same render.
+  const merged: CmoFastData = {
+    ...fast,
+    scores: {
+      seo: slow.freshSeoScore ?? fast.scores.seo,
+      geo: slow.freshGeoScore ?? fast.scores.geo,
+    },
+    topIssues:
+      slow.freshSeoIssues && slow.freshSeoIssues.length > 0
+        ? slow.freshSeoIssues
+        : fast.topIssues,
+  };
+  return <AnalyticsPanel data={{ ...merged, ...slow }} />;
 }
 
 async function CompanyPanelWithLive({

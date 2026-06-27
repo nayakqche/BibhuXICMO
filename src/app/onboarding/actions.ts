@@ -70,8 +70,6 @@ export async function startOnboardingAction(
           competitorNotes: strategy.competitorNotes,
           topicClusters: strategy.topicClusters,
           channels: strategy.channels,
-          brandVoiceDoc: strategy.brandVoiceDoc,
-          marketingStrategyDoc: strategy.marketingStrategyDoc,
           siteTitle: snapshot.title,
           siteDescription: snapshot.description,
         })),

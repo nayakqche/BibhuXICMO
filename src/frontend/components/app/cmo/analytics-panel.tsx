@@ -814,7 +814,8 @@ function ChecksTab({ data }: { data: CmoData }) {
       ) : null}
       {issues.length === 0 ? (
         <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          No SEO audit yet. Run the SEO agent to populate checks.
+          Running the first SEO audit… checks populate automatically once it
+          finishes. Hit Refresh if this lingers.
         </div>
       ) : (
         <ul className="divide-y rounded-md border">

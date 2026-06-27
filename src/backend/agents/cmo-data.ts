@@ -182,6 +182,16 @@ export type CmoSlowData = {
   freshVoice: CmoVoiceProfile | null;
   freshIndustry: string | null;
   freshIcp: string | null;
+  /**
+   * If no SEO audit / GEO snapshot existed when the dashboard loaded, we
+   * lazily auto-run those agents once and surface the fresh results here so
+   * the Analytics panel populates without the user manually opening each
+   * agent. Null when an audit/snapshot already existed (read from fast data)
+   * or the auto-run was skipped/failed.
+   */
+  freshSeoScore: number | null;
+  freshSeoIssues: SeoIssue[] | null;
+  freshGeoScore: number | null;
 };
 
 /** Combined view (used after both phases resolve). */
@@ -434,8 +444,6 @@ export async function loadCmoSlowData(args: {
         competitorNotes: strategy.competitorNotes,
         topicClusters: strategy.topicClusters,
         channels: strategy.channels,
-        brandVoiceDoc: strategy.brandVoiceDoc,
-        marketingStrategyDoc: strategy.marketingStrategyDoc,
         siteTitle: snapshot.title,
         siteDescription: snapshot.description,
       };
@@ -535,6 +543,65 @@ export async function loadCmoSlowData(args: {
     }
   }
 
+  // Lazy auto-run of SEO + GEO so the Analytics panel populates without the
+  // user manually opening each agent. Strictly gated: only fires when there
+  // is NO existing audit / GEO snapshot (i.e. a brand-new site), and the
+  // result row that the agent writes prevents it from re-running on the next
+  // load. Both run in parallel and are fully best-effort.
+  let freshSeoScore: number | null = null;
+  let freshSeoIssues: SeoIssue[] | null = null;
+  let freshGeoScore: number | null = null;
+  if (websiteUrl && pickAvailableModel() != null) {
+    const [existingAudit, existingGeo] = await Promise.all([
+      prisma.siteAudit
+        .findFirst({ where: { workspaceId: args.workspaceId } })
+        .catch(() => null),
+      prisma.geoScoreSnapshot
+        .findFirst({ where: { workspaceId: args.workspaceId } })
+        .catch(() => null),
+    ]);
+
+    const tasks: Array<Promise<void>> = [];
+    if (!existingAudit) {
+      tasks.push(
+        (async () => {
+          try {
+            const { seoAgent } = await import("@/backend/agents/seo");
+            const { executeAgent } = await import("@/backend/agents/base");
+            const res = await executeAgent(seoAgent, args.workspaceId, {});
+            if (res.ok && res.output) {
+              const out = res.output as { score?: number; issues?: unknown[] };
+              freshSeoScore = typeof out.score === "number" ? out.score : null;
+              freshSeoIssues = Array.isArray(out.issues)
+                ? (out.issues as unknown[]).filter((x): x is SeoIssue => isIssue(x))
+                : null;
+            }
+          } catch (err) {
+            console.error("[cmo] lazy SEO auto-run failed:", err);
+          }
+        })()
+      );
+    }
+    if (!existingGeo) {
+      tasks.push(
+        (async () => {
+          try {
+            const { geoAgent } = await import("@/backend/agents/geo");
+            const { executeAgent } = await import("@/backend/agents/base");
+            const res = await executeAgent(geoAgent, args.workspaceId, {});
+            if (res.ok && res.output) {
+              const out = res.output as { score?: number };
+              freshGeoScore = typeof out.score === "number" ? out.score : null;
+            }
+          } catch (err) {
+            console.error("[cmo] lazy GEO auto-run failed:", err);
+          }
+        })()
+      );
+    }
+    if (tasks.length) await Promise.all(tasks);
+  }
+
   return {
     liveSnapshot,
     pageSpeed,
@@ -545,6 +612,9 @@ export async function loadCmoSlowData(args: {
     freshVoice,
     freshIndustry,
     freshIcp,
+    freshSeoScore,
+    freshSeoIssues,
+    freshGeoScore,
   };
 }
 
