@@ -197,6 +197,12 @@ export type CmoSlowData = {
    * GEO tab's "Site Files" section (robots.txt, llms.txt, sitemap.xml).
    */
   siteFiles: SiteFileCheck[];
+  /**
+   * Latest cached AI_VISIBILITY result (Apify) summarised for the GEO tab's
+   * "AI citations" breakdown. Null when the GEO agent's AI-visibility run
+   * hasn't been cached yet.
+   */
+  aiCitations: AiCitationsSummary | null;
 };
 
 export type SiteFileCheck = {
@@ -205,6 +211,74 @@ export type SiteFileCheck = {
   present: boolean;
   sizeBytes: number | null;
 };
+
+export type AiCitationsSummary = {
+  domain: string;
+  fetchedAt: string;
+  total: number;
+  platforms: Array<{
+    key: string;
+    label: string;
+    citations: number;
+    delta: number | null;
+  }>;
+};
+
+const AI_PLATFORM_LABEL: Record<string, string> = {
+  aiOverviews: "AI Overviews",
+  chatgpt: "ChatGPT",
+  gemini: "Gemini",
+  perplexity: "Perplexity",
+  copilot: "Copilot",
+  grok: "Grok",
+};
+
+/** Read the latest cached AI_VISIBILITY run and summarise it for the GEO tab. */
+async function loadAiCitationsSummary(
+  workspaceId: string,
+  websiteUrl: string
+): Promise<AiCitationsSummary | null> {
+  let domain = "";
+  try {
+    const u = websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`;
+    domain = new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    domain = websiteUrl;
+  }
+  let row;
+  try {
+    row = await prisma.seoToolRun.findFirst({
+      where: { workspaceId, tool: "AI_VISIBILITY" },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch {
+    return null;
+  }
+  if (!row) return null;
+  const result = row.result as {
+    byProvider?: Array<{
+      platform?: string;
+      citations?: number | null;
+      priorMonthCitations?: number | null;
+    }>;
+  };
+  const byProvider = Array.isArray(result?.byProvider) ? result.byProvider : [];
+  const platforms = byProvider
+    .filter((r) => r.platform && AI_PLATFORM_LABEL[r.platform])
+    .map((r) => {
+      const citations = r.citations ?? 0;
+      const prior = r.priorMonthCitations;
+      return {
+        key: r.platform as string,
+        label: AI_PLATFORM_LABEL[r.platform as string],
+        citations,
+        delta: typeof prior === "number" ? citations - prior : null,
+      };
+    });
+  if (platforms.length === 0) return null;
+  const total = platforms.reduce((acc, p) => acc + p.citations, 0);
+  return { domain, fetchedAt: row.createdAt.toISOString(), total, platforms };
+}
 
 /** Combined view (used after both phases resolve). */
 export type CmoData = CmoFastData & CmoSlowData;
@@ -564,17 +638,40 @@ export async function loadCmoSlowData(args: {
   let freshSeoIssues: SeoIssue[] | null = null;
   let freshGeoScore: number | null = null;
   if (websiteUrl && pickAvailableModel() != null) {
-    const [existingAudit, existingGeo] = await Promise.all([
-      prisma.siteAudit
-        .findFirst({ where: { workspaceId: args.workspaceId } })
-        .catch(() => null),
-      prisma.geoScoreSnapshot
-        .findFirst({ where: { workspaceId: args.workspaceId } })
-        .catch(() => null),
-    ]);
+    // Dedupe: if an agent ran (or is running) in the last 10 minutes, don't
+    // kick a duplicate — this stops a refresh during the first audit from
+    // double-billing while the first run is still in flight.
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const [existingAudit, existingGeo, recentSeoRun, recentGeoRun] =
+      await Promise.all([
+        prisma.siteAudit
+          .findFirst({ where: { workspaceId: args.workspaceId } })
+          .catch(() => null),
+        prisma.geoScoreSnapshot
+          .findFirst({ where: { workspaceId: args.workspaceId } })
+          .catch(() => null),
+        prisma.agentRun
+          .findFirst({
+            where: {
+              workspaceId: args.workspaceId,
+              agent: "seo",
+              startedAt: { gte: tenMinAgo },
+            },
+          })
+          .catch(() => null),
+        prisma.agentRun
+          .findFirst({
+            where: {
+              workspaceId: args.workspaceId,
+              agent: "geo",
+              startedAt: { gte: tenMinAgo },
+            },
+          })
+          .catch(() => null),
+      ]);
 
     const tasks: Array<Promise<void>> = [];
-    if (!existingAudit) {
+    if (!existingAudit && !recentSeoRun) {
       tasks.push(
         (async () => {
           try {
@@ -594,7 +691,7 @@ export async function loadCmoSlowData(args: {
         })()
       );
     }
-    if (!existingGeo) {
+    if (!existingGeo && !recentGeoRun) {
       tasks.push(
         (async () => {
           try {
@@ -614,8 +711,14 @@ export async function loadCmoSlowData(args: {
     if (tasks.length) await Promise.all(tasks);
   }
 
-  // Probe crawler / AI-accessibility files for the GEO "Site Files" section.
-  const siteFiles = websiteUrl ? await probeSiteFiles(websiteUrl) : [];
+  // Probe crawler / AI-accessibility files + read cached AI citations for
+  // the GEO tab, in parallel.
+  const [siteFiles, aiCitations] = await Promise.all([
+    websiteUrl ? probeSiteFiles(websiteUrl) : Promise.resolve([]),
+    websiteUrl
+      ? loadAiCitationsSummary(args.workspaceId, websiteUrl)
+      : Promise.resolve(null),
+  ]);
 
   return {
     liveSnapshot,
@@ -631,6 +734,7 @@ export async function loadCmoSlowData(args: {
     freshSeoIssues,
     freshGeoScore,
     siteFiles,
+    aiCitations,
   };
 }
 
