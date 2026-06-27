@@ -59,12 +59,29 @@ const STORAGE_KEY = "cmo:analytics:tab";
 
 export function AnalyticsPanel({ data }: { data: CmoData }) {
   const [tab, setTab] = useState<CmoTab>("health");
+  const router = useRouter();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const v = window.localStorage.getItem(STORAGE_KEY);
     if (v && TABS.includes(v as CmoTab)) setTab(v as CmoTab);
   }, []);
+
+  // Auto-pick up SEO/GEO data once the lazy auto-run finishes. When a site
+  // is set but a score is still missing, poll a few times (every 18s, up to
+  // ~2 min) so the panel fills in without the user manually refreshing.
+  const needsSeo = !!data.workspace.websiteUrl && data.scores.seo == null;
+  const needsGeo = !!data.workspace.websiteUrl && data.scores.geo == null;
+  useEffect(() => {
+    if (!needsSeo && !needsGeo) return;
+    let count = 0;
+    const id = setInterval(() => {
+      count += 1;
+      router.refresh();
+      if (count >= 7) clearInterval(id);
+    }, 18_000);
+    return () => clearInterval(id);
+  }, [needsSeo, needsGeo, router]);
 
   function onChange(v: string) {
     if (TABS.includes(v as CmoTab)) {
@@ -748,6 +765,9 @@ function AiGeoTab({ data }: { data: CmoData }) {
         />
       </div>
 
+      {/* AI citations breakdown — real Apify AI-visibility data. */}
+      <AiCitationsBreakdown summary={data.aiCitations ?? null} />
+
       {data.topKeywords.length > 0 ? (
         <div>
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -779,6 +799,68 @@ function AiGeoTab({ data }: { data: CmoData }) {
         GEO measures how often LLMs cite your brand. The checklist above shows how
         ready your site is to BE cited; run the GEO agent for a measured citation score.
       </div>
+    </div>
+  );
+}
+
+function AiCitationsBreakdown({
+  summary,
+}: {
+  summary: CmoData["aiCitations"];
+}) {
+  if (!summary || summary.platforms.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
+        No AI citation data yet. Run the GEO agent&rsquo;s AI-visibility check
+        to see how often each model cites {summary?.domain || "your domain"}.
+      </div>
+    );
+  }
+  const sorted = [...summary.platforms].sort((a, b) => b.citations - a.citations);
+  return (
+    <div className="rounded-md border bg-muted/15 p-3">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
+          AI citations
+        </div>
+        <span className="text-[11px] text-muted-foreground">
+          <span className="font-semibold tabular-nums text-foreground">
+            {formatCompact(summary.total)}
+          </span>{" "}
+          total · {summary.platforms.length} platforms
+        </span>
+      </div>
+      <ul className="divide-y rounded-md border bg-background/40">
+        {sorted.map((p) => (
+          <li
+            key={p.key}
+            className="flex items-center gap-2 px-3 py-2 text-xs"
+          >
+            <span className="font-medium text-foreground">{p.label}</span>
+            <span className="ml-auto flex items-center gap-1.5 tabular-nums">
+              <span className="font-semibold text-sky-500">
+                {formatCompact(p.citations)}
+              </span>
+              {p.delta != null && p.delta !== 0 ? (
+                <span
+                  className={
+                    "text-[10px] " +
+                    (p.delta > 0 ? "text-emerald-500" : "text-amber-500")
+                  }
+                >
+                  {p.delta > 0 ? "+" : ""}
+                  {formatCompact(p.delta)}
+                </span>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-[10px] text-muted-foreground">
+        {summary.domain} · updated{" "}
+        {new Date(summary.fetchedAt).toLocaleDateString()}
+      </p>
     </div>
   );
 }
@@ -958,6 +1040,16 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatCompact(n: number): string {
+  const neg = n < 0;
+  const abs = Math.abs(n);
+  let s: string;
+  if (abs >= 1_000_000) s = `${(abs / 1_000_000).toFixed(1)}M`;
+  else if (abs >= 1_000) s = `${(abs / 1_000).toFixed(1)}K`;
+  else s = String(abs);
+  return neg ? `-${s}` : s;
 }
 
 function ChecksTab({ data }: { data: CmoData }) {

@@ -531,16 +531,32 @@ function buildMarketingStrategyDoc(data: CompanyData, siteName: string): string 
     lines.push("");
   }
 
-  // 3. Competitive landscape
+  // 3. Competitive landscape — use the per-competitor LLM notes when present
+  // so every row is specific (not the same templated line).
   if (competitors.length) {
+    const notes = v?.competitorNotes ?? [];
+    const noteFor = (name: string): string | null => {
+      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const n = norm(name);
+      const m = notes.find((x) => {
+        const xn = norm(x.name);
+        return xn && (n.includes(xn) || xn.includes(n));
+      });
+      return m?.note ?? null;
+    };
     lines.push("## 3. Competitive landscape", "");
-    lines.push("| Competitor | Their angle | Where we win |");
+    lines.push("| Competitor | How they compete | Where we win |");
     lines.push("| --- | --- | --- |");
     for (const c of competitors.slice(0, 10)) {
       const name = c.split("(")[0].trim();
-      lines.push(
-        `| ${name} | Established player; broad feature surface. | Speed, specificity, and a clearer point of view for ${audienceNoun}. |`
-      );
+      const note = noteFor(name);
+      const angle = note
+        ? note.replace(/\|/g, "/")
+        : `Targets ${audienceNoun} in ${industry || "the category"}; broad but generic.`;
+      const win = note
+        ? "Sharper positioning, faster time-to-value, and a clearer POV."
+        : `Speed, specificity, and a clearer point of view for ${audienceNoun}.`;
+      lines.push(`| ${name} | ${angle} | ${win} |`);
     }
     lines.push("");
   }
