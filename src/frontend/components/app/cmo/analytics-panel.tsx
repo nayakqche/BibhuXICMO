@@ -31,6 +31,8 @@ import {
 } from "@/frontend/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import type { CmoData } from "@/backend/agents/cmo-data";
+import { PlatformIcon } from "@/frontend/components/app/cmo/platform-icon";
+import type { PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
 import type { LighthouseScores } from "@/backend/pagespeed";
 import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 
@@ -756,7 +758,12 @@ function AiGeoTab({ data }: { data: CmoData }) {
         </div>
       ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <BigStat label="GEO score" value={data.scores.geo} suffix="/100" tone="primary" />
+        <BigStat
+          label="GEO score"
+          value={geoDisplayScore(data.scores.geo, data.aiCitations ?? null)}
+          suffix="/100"
+          tone="primary"
+        />
         <BigStat label="SEO score" value={data.scores.seo} suffix="/100" tone="default" />
         <BigStat
           label="Tracked queries"
@@ -837,6 +844,7 @@ function AiCitationsBreakdown({
             key={p.key}
             className="flex items-center gap-2 px-3 py-2 text-xs"
           >
+            <PlatformIcon k={p.key as PlatformKey} className="h-4 w-4" />
             <span className="font-medium text-foreground">{p.label}</span>
             <span className="ml-auto flex items-center gap-1.5 tabular-nums">
               <span className="font-semibold text-sky-500">
@@ -1040,6 +1048,27 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The GEO agent's probe-based score is often 0 for sites that ARE heavily
+ * cited (the probe asks a handful of questions; the AI-visibility actor
+ * measures real citation volume across every platform). When the probe
+ * score is missing or 0 but we have real citation data, derive a score
+ * from platform coverage + citation volume so the dashboard stops showing
+ * a contradictory "0/100" next to "19.9K citations".
+ */
+function geoDisplayScore(
+  probeScore: number | null,
+  summary: CmoData["aiCitations"],
+): number | null {
+  if (probeScore != null && probeScore > 0) return probeScore;
+  if (!summary || summary.platforms.length === 0) return probeScore;
+  const platformsCited = summary.platforms.filter((p) => p.citations > 0).length;
+  const coverage = Math.round((platformsCited / 6) * 40); // 0–40
+  const volume = Math.min(50, Math.round(Math.log10(summary.total + 1) * 11)); // 0–50
+  const score = Math.max(0, Math.min(100, coverage + volume));
+  return score;
 }
 
 function formatCompact(n: number): string {
