@@ -1,14 +1,11 @@
-"""Thin LLM wrapper with multi-provider support.
+"""Thin LLM wrapper — Anthropic Claude only.
 
-The agent uses Anthropic Claude when `ANTHROPIC_API_KEY` is set,
-otherwise it falls back to OpenAI. Both providers are exposed through
-the same two functions:
+This module talks exclusively to Anthropic Claude. There is no OpenAI /
+ChatGPT path here by design; the Reddit agent uses Anthropic for all
+reasoning and Apify for Reddit data.
 
   - chat_text(system, user)  -> str
   - chat_json(system, user)  -> parsed JSON
-
-Add new providers by extending `_provider()` and adding the two private
-implementations.
 """
 from __future__ import annotations
 
@@ -26,30 +23,21 @@ from typing import Any
 def _provider() -> str:
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
     return "none"
 
 
 def current_provider() -> dict:
-    p = _provider()
-    if p == "anthropic":
+    if _provider() == "anthropic":
         return {
             "name": "anthropic",
             "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-        }
-    if p == "openai":
-        return {
-            "name": "openai",
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         }
     return {"name": "none", "model": ""}
 
 
 def _no_provider() -> RuntimeError:
     return RuntimeError(
-        "No LLM provider configured. Set ANTHROPIC_API_KEY (preferred) "
-        "or OPENAI_API_KEY in backend/.env."
+        "No LLM provider configured. Set ANTHROPIC_API_KEY in backend/.env."
     )
 
 
@@ -58,70 +46,17 @@ def _no_provider() -> RuntimeError:
 # ---------------------------------------------------------------------------
 
 
-def _is_recoverable_provider_error(err: Exception) -> bool:
-    """True when an Anthropic failure should trigger a fallback to OpenAI
-    rather than bubbling up — billing/credit, auth, rate-limit, overloaded,
-    or transient network errors. A real bug (e.g. our own ValueError) is
-    NOT recoverable and is re-raised so it surfaces."""
-    msg = str(err).lower()
-    needles = (
-        "credit balance",
-        "too low",
-        "billing",
-        "payment",
-        "quota",
-        "insufficient",
-        "rate limit",
-        "rate_limit",
-        "overloaded",
-        "unauthorized",
-        "authentication",
-        "invalid_api_key",
-        "permission",
-        "429",
-        "401",
-        "403",
-        "500",
-        "502",
-        "503",
-        "connection",
-        "timeout",
-        "timed out",
-    )
-    return any(n in msg for n in needles)
-
-
 def chat_text(system: str, user: str, *, temperature: float = 0.7) -> str:
-    p = _provider()
-    if p == "anthropic":
-        try:
-            return _anthropic_text(system, user, temperature)
-        except Exception as err:  # noqa: BLE001
-            if os.getenv("OPENAI_API_KEY") and _is_recoverable_provider_error(err):
-                print(f"[llm] anthropic failed ({err}); falling back to openai")
-                return _openai_text(system, user, temperature)
-            raise
-    if p == "openai":
-        return _openai_text(system, user, temperature)
+    if _provider() == "anthropic":
+        return _anthropic_text(system, user, temperature)
     raise _no_provider()
 
 
 def chat_json(system: str, user: str, *, temperature: float = 0.4) -> Any:
-    """Return parsed JSON. The system prompt should request JSON; we
-    additionally enforce it on the model side where possible (OpenAI's
-    `response_format`) and via prefill on Anthropic."""
-    p = _provider()
-    if p == "anthropic":
-        try:
-            raw = _anthropic_json(system, user, temperature)
-        except Exception as err:  # noqa: BLE001
-            if os.getenv("OPENAI_API_KEY") and _is_recoverable_provider_error(err):
-                print(f"[llm] anthropic failed ({err}); falling back to openai")
-                raw = _openai_json(system, user, temperature)
-            else:
-                raise
-    elif p == "openai":
-        raw = _openai_json(system, user, temperature)
+    """Return parsed JSON. The system prompt should request JSON; our
+    lenient parser extracts the outer object even if there's any chatter."""
+    if _provider() == "anthropic":
+        raw = _anthropic_json(system, user, temperature)
     else:
         raise _no_provider()
     return _parse_json_lenient(raw)
@@ -163,8 +98,8 @@ def _anthropic_model() -> str:
     return os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 
-# Per-request timeout for LLM calls. Keeps a hung Anthropic / OpenAI
-# request from blocking a worker thread forever. ~60 s is enough for
+# Per-request timeout for LLM calls. Keeps a hung Anthropic request from
+# blocking a worker thread forever. ~60 s is enough for
 # any normal completion at our token sizes; if it runs over, that's
 # almost always a network or rate-limit issue and we'd rather see it
 # now than at 15 minutes in.
@@ -213,59 +148,6 @@ def _anthropic_join(msg) -> str:
         if text:
             parts.append(text)
     return "".join(parts).strip()
-
-
-# ---------------------------------------------------------------------------
-# OpenAI
-# ---------------------------------------------------------------------------
-
-
-_openai_client = None
-
-
-def _get_openai():
-    global _openai_client
-    if _openai_client is None:
-        from openai import OpenAI
-
-        _openai_client = OpenAI(
-            api_key=_clean_key("OPENAI_API_KEY", "sk-"),
-            base_url=os.getenv("OPENAI_BASE_URL") or None,
-        )
-    return _openai_client
-
-
-def _openai_model() -> str:
-    return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-
-def _openai_text(system: str, user: str, temperature: float) -> str:
-    client = _get_openai()
-    resp = client.chat.completions.create(
-        model=_openai_model(),
-        temperature=temperature,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        timeout=_LLM_TIMEOUT,
-    )
-    return (resp.choices[0].message.content or "").strip()
-
-
-def _openai_json(system: str, user: str, temperature: float) -> str:
-    client = _get_openai()
-    resp = client.chat.completions.create(
-        model=_openai_model(),
-        temperature=temperature,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        timeout=_LLM_TIMEOUT,
-    )
-    return resp.choices[0].message.content or "{}"
 
 
 # ---------------------------------------------------------------------------

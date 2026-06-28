@@ -79,7 +79,6 @@ type Health = {
     provider: string;
     model: string;
     anthropic_configured: boolean;
-    openai_configured: boolean;
   };
   reddit: {
     backend: string;
