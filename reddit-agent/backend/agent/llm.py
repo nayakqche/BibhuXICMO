@@ -58,10 +58,49 @@ def _no_provider() -> RuntimeError:
 # ---------------------------------------------------------------------------
 
 
+def _is_recoverable_provider_error(err: Exception) -> bool:
+    """True when an Anthropic failure should trigger a fallback to OpenAI
+    rather than bubbling up — billing/credit, auth, rate-limit, overloaded,
+    or transient network errors. A real bug (e.g. our own ValueError) is
+    NOT recoverable and is re-raised so it surfaces."""
+    msg = str(err).lower()
+    needles = (
+        "credit balance",
+        "too low",
+        "billing",
+        "payment",
+        "quota",
+        "insufficient",
+        "rate limit",
+        "rate_limit",
+        "overloaded",
+        "unauthorized",
+        "authentication",
+        "invalid_api_key",
+        "permission",
+        "429",
+        "401",
+        "403",
+        "500",
+        "502",
+        "503",
+        "connection",
+        "timeout",
+        "timed out",
+    )
+    return any(n in msg for n in needles)
+
+
 def chat_text(system: str, user: str, *, temperature: float = 0.7) -> str:
     p = _provider()
     if p == "anthropic":
-        return _anthropic_text(system, user, temperature)
+        try:
+            return _anthropic_text(system, user, temperature)
+        except Exception as err:  # noqa: BLE001
+            if os.getenv("OPENAI_API_KEY") and _is_recoverable_provider_error(err):
+                print(f"[llm] anthropic failed ({err}); falling back to openai")
+                return _openai_text(system, user, temperature)
+            raise
     if p == "openai":
         return _openai_text(system, user, temperature)
     raise _no_provider()
@@ -73,7 +112,14 @@ def chat_json(system: str, user: str, *, temperature: float = 0.4) -> Any:
     `response_format`) and via prefill on Anthropic."""
     p = _provider()
     if p == "anthropic":
-        raw = _anthropic_json(system, user, temperature)
+        try:
+            raw = _anthropic_json(system, user, temperature)
+        except Exception as err:  # noqa: BLE001
+            if os.getenv("OPENAI_API_KEY") and _is_recoverable_provider_error(err):
+                print(f"[llm] anthropic failed ({err}); falling back to openai")
+                raw = _openai_json(system, user, temperature)
+            else:
+                raise
     elif p == "openai":
         raw = _openai_json(system, user, temperature)
     else:
