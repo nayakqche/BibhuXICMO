@@ -75,25 +75,32 @@ export default async function CmoAgentPage() {
       <TerminalPanel lines={terminalLines} maxHeightClass="max-h-28" />
 
       {/*
-        Dashboard quadrant: 2x2 grid of self-sizing cards. Each card auto-
-        adjusts to its content (no hard min-heights), so a thin "Loading"
-        Company panel and a fully-loaded Analytics card no longer have to
-        match the tallest sibling's height. items-start prevents the grid
-        from stretching every card to the row's max height.
+        Masonry-style 2-column layout. Each column is an independent flex
+        stack, so cards flow back-to-back within their own column instead
+        of sharing a grid row's height. A short Company panel no longer
+        leaves a gap waiting for the tall Analytics panel beside it — every
+        card sizes to its own content with no vacant space below it.
+
+        Left column:  Company  + Actions feed
+        Right column: Analytics + Talk to AI CMO
       */}
-      <div className="grid auto-rows-min items-start gap-4 md:grid-cols-2">
-        <Suspense
-          fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
-        >
-          <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
-        </Suspense>
-        <Suspense fallback={<AnalyticsSkeleton />}>
-          <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
-        </Suspense>
-        <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
-          <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
-        </Suspense>
-        <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
+      <div className="grid items-start gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-4">
+          <Suspense
+            fallback={<CompanyPanel data={fast} analyzing={companyAnalyzing} />}
+          >
+            <CompanyPanelWithLive fast={fast} workspaceId={workspace.id} />
+          </Suspense>
+          <Suspense fallback={<ActionsFeed items={fast.openActions} plan={plan} />}>
+            <ActionsFeedStreamed fast={fast} workspaceId={workspace.id} plan={plan} />
+          </Suspense>
+        </div>
+        <div className="flex flex-col gap-4">
+          <Suspense fallback={<AnalyticsSkeleton />}>
+            <AnalyticsPanelStreamed fast={fast} workspaceId={workspace.id} />
+          </Suspense>
+          <ChatDock workspaceName={workspace.name} llmConfigured={llmConfigured} />
+        </div>
       </div>
     </div>
   );
