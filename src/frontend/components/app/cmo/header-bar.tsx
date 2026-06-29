@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { Pencil, TerminalSquare, Zap } from "lucide-react";
+import { Pencil, Zap } from "lucide-react";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import { SiteFavicon } from "@/frontend/components/app/cmo/site-favicon";
-import { SITE_NAME } from "@/shared/site";
 
 export function HeaderBar({
   websiteUrl,
@@ -34,8 +33,6 @@ export function HeaderBar({
       </Link>
 
       <div className="flex items-center gap-2 text-sm">
-        <TerminalSquare className="h-4 w-4 text-muted-foreground" aria-hidden />
-        <span className="font-medium">{SITE_NAME} terminal</span>
         <Badge
           variant="outline"
           className={
