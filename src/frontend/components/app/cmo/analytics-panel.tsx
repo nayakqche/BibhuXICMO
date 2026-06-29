@@ -267,11 +267,11 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Search rankings"
         connected={gsc}
         href="/integrations/gsc"
-        // Modern 2025 Search Console mark served from Wikimedia Commons.
-        // The bundled /google-search-console.svg in /public is the
-        // automatic fallback if the CDN is ever unreachable.
-        iconSrc="https://upload.wikimedia.org/wikipedia/commons/5/5c/Google_Search_Console_Logo_2025.svg"
-        iconFallbackSrc="/google-search-console.svg"
+        // Icon-only Search Console mark (no wordmark). Wikimedia's
+        // "Google_Search_Console_Logo_2025.svg" file is the wordmark
+        // + icon combo, which made the tile show "Google Search
+        // Console" text instead of just the logo.
+        iconSrc="/google-search-console.svg"
       />
     </div>
   );
@@ -297,14 +297,14 @@ function ConnectCard({
   return (
     <div className="rounded-xl border bg-muted/20 p-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-background">
-          <span className="relative h-5 w-5">
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-background">
+          <span className="relative h-8 w-8">
             <NextImage
               src={imgSrc}
               alt={`${title} logo`}
               fill
               unoptimized
-              sizes="20px"
+              sizes="32px"
               className="object-contain"
               onError={() => {
                 if (iconFallbackSrc && imgSrc !== iconFallbackSrc) {
