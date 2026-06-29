@@ -141,6 +141,7 @@ model Workspace {
   agentRuns       AgentRun[]
   chatSessions    ChatSession[]
   scheduledPosts  ScheduledPost[]
+  backlinkOrders  BacklinkOrder[]
 }
 
 model WorkspaceMember {
@@ -949,4 +950,38 @@ model MailingContact {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+}
+
+// ===========================================================================
+//  Backlink Marketplace — premium backlink package purchases
+// ===========================================================================
+
+enum BacklinkOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  FAILED
+}
+
+model BacklinkOrder {
+  id                String              @id @default(cuid())
+  workspaceId       String
+  packageKey        String // "bl3" | "bl5" | "bl10"
+  packageLabel      String
+  backlinkCount     Int
+  amountUsdCents    Int // 45000 = $450
+  currency          String              @default("USD")
+  /// [{ url, anchorText }]
+  links             Json
+  status            BacklinkOrderStatus @default(PENDING_PAYMENT)
+  provider          String? // "razorpay" | "paypal"
+  providerOrderId   String? // razorpay order_id / paypal order id
+  providerPaymentId String? // razorpay_payment_id / paypal capture id
+  contactEmail      String? // logged-in submitter email
+  paidAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt])
 }

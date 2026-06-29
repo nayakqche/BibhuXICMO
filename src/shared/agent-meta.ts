@@ -76,6 +76,14 @@ export const AGENT_META: Record<string, AgentMeta> = {
     description: "Founder-voice posts and engagement-driven thought leadership.",
     href: "/agents/linkedin",
   },
+  "backlink-marketplace": {
+    id: "backlink-marketplace",
+    label: "Backlink Marketplace",
+    creditsApprox: 0,
+    description:
+      "Buy premium, niche-matched backlinks and pay via Razorpay or PayPal.",
+    href: "/agents/backlink-marketplace",
+  },
 };
 
 export function getAgentMeta(id: string): AgentMeta | undefined {

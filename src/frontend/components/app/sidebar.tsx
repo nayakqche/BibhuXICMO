@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Plug,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 import {
   BacklinkLogo,
@@ -62,14 +63,20 @@ const SETTINGS = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+const ADMIN = [
+  { href: "/admin/backlink-orders", label: "Backlink Orders", icon: ShieldCheck },
+];
+
 export function Sidebar({
   workspaceName,
   workspaceId,
   plan,
+  isAdmin = false,
 }: {
   workspaceName: string;
   workspaceId: string;
   plan: Plan;
+  isAdmin?: boolean;
 }) {
   const { mobileOpen, close, collapsed, toggleCollapsed } = useSidebar();
 
@@ -145,6 +152,12 @@ export function Sidebar({
           <Section items={DATA} collapsed={collapsed} />
           <SectionTitle collapsed={collapsed}>Workspace</SectionTitle>
           <Section items={SETTINGS} collapsed={collapsed} />
+          {isAdmin ? (
+            <>
+              <SectionTitle collapsed={collapsed}>Admin</SectionTitle>
+              <Section items={ADMIN} collapsed={collapsed} />
+            </>
+          ) : null}
         </nav>
 
         <div
