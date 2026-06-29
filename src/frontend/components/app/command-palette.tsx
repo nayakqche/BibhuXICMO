@@ -10,7 +10,6 @@ import {
   FileText,
   Hash,
   Home,
-  Layers,
   Link2,
   Linkedin,
   LogOut,
@@ -40,9 +39,6 @@ import {
 const NAVIGATE = [
   { label: "Dashboard", href: "/dashboard", icon: Home, shortcut: "g d" },
   { label: "AI CMO", href: "/agent/cmo", icon: Bot },
-  { label: "Action Items", href: "/actions", icon: Sparkles, shortcut: "g a" },
-  { label: "Content Library", href: "/content", icon: FileText },
-  { label: "Publish Queue", href: "/queue", icon: Layers },
   { label: "Private Chat", href: "/chat", icon: MessageSquare, shortcut: "g c" },
   { label: "Settings", href: "/settings", icon: Settings, shortcut: "g s" },
   { label: "Billing", href: "/billing", icon: CreditCard },
