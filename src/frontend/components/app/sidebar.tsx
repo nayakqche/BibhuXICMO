@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3,
   Bot,
   CreditCard,
   FileText,
@@ -14,12 +13,13 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  TrendingUp,
 } from "lucide-react";
 import {
   BacklinkLogo,
   ContentLogo,
   GeoLogo,
+  GoogleAnalyticsLogo,
+  GoogleSearchConsoleLogo,
   HackerNewsLogo,
   InstagramLogo,
   LinkedinLogo,
@@ -59,8 +59,8 @@ const AGENTS = [
 ];
 
 const DATA = [
-  { href: "/integrations/gsc", label: "Search Console", icon: TrendingUp },
-  { href: "/integrations/ga4", label: "Google Analytics", icon: BarChart3 },
+  { href: "/integrations/gsc", label: "Search Console", icon: GoogleSearchConsoleLogo },
+  { href: "/integrations/ga4", label: "Google Analytics", icon: GoogleAnalyticsLogo },
 ];
 
 const SETTINGS = [
