@@ -35,6 +35,10 @@ import { PlatformIcon } from "@/frontend/components/app/cmo/platform-icon";
 import { PLATFORMS, type PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
 import type { LighthouseScores } from "@/backend/pagespeed";
 import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
+import {
+  startAiCitationsRunAction,
+  pollAiCitationsRunAction,
+} from "@/app/(app)/agents/geo/ai-citations-actions";
 
 function heuristicToLighthouse(
   h: NonNullable<CmoData["llmAnalysis"]>["heuristicLighthouse"]
@@ -84,6 +88,65 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
     }, 18_000);
     return () => clearInterval(id);
   }, [needsSeo, needsGeo, router]);
+
+  // Auto-run the AI-visibility (AI citations) check ONCE per new site so the
+  // AI citations breakdown + the derived GEO score populate without the user
+  // manually opening the GEO agent and clicking "Run check". Hard-deduped:
+  //  - the server caches the result 24h (a repeat call is free), and
+  //  - a per-domain localStorage stamp stops a reload from starting a second
+  //    paid run while the first is still in flight.
+  const aivizDomain = data.workspace.websiteUrl;
+  const hasCitations =
+    !!data.aiCitations && data.aiCitations.platforms.length > 0;
+  const [aivizRunning, setAivizRunning] = useState(false);
+  useEffect(() => {
+    if (!aivizDomain || hasCitations) return;
+    const norm = aivizDomain
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/.*$/, "")
+      .toLowerCase();
+    const key = `cmo:aiviz:${norm}`;
+    if (typeof window !== "undefined") {
+      const last = window.localStorage.getItem(key);
+      // Skip if we already kicked a run for this domain in the last 24h.
+      if (last && Date.now() - Number(last) < 24 * 60 * 60 * 1000) return;
+      window.localStorage.setItem(key, String(Date.now()));
+    }
+    let cancelled = false;
+    (async () => {
+      setAivizRunning(true);
+      try {
+        const res = await startAiCitationsRunAction({ domain: aivizDomain });
+        if (!res.ok) return; // Apify not configured / no URL — fail quiet.
+        if (!res.pending) {
+          if (!cancelled) router.refresh();
+          return;
+        }
+        const start = Date.now();
+        while (!cancelled && Date.now() - start < 150_000) {
+          await new Promise((r) => setTimeout(r, 5_000));
+          const p = await pollAiCitationsRunAction({
+            runId: res.runId,
+            datasetId: res.datasetId,
+            domain: aivizDomain,
+          });
+          if (!p.ok) break;
+          if (p.status === "DONE") {
+            if (!cancelled) router.refresh();
+            break;
+          }
+        }
+      } catch {
+        /* best-effort — never surface a hard error for an auto-run */
+      } finally {
+        if (!cancelled) setAivizRunning(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [aivizDomain, hasCitations, router]);
 
   function onChange(v: string) {
     if (TABS.includes(v as CmoTab)) {
@@ -147,7 +210,7 @@ export function AnalyticsPanel({ data }: { data: CmoData }) {
             <TechnicalTab data={data} />
           </TabsContent>
           <TabsContent value="aigeo" className="flex-1">
-            <AiGeoTab data={data} />
+            <AiGeoTab data={data} citationsLoading={aivizRunning} />
           </TabsContent>
           <TabsContent value="checks" className="flex-1">
             <ChecksTab data={data} />
@@ -736,7 +799,13 @@ function TechnicalTab({ data }: { data: CmoData }) {
   );
 }
 
-function AiGeoTab({ data }: { data: CmoData }) {
+function AiGeoTab({
+  data,
+  citationsLoading = false,
+}: {
+  data: CmoData;
+  citationsLoading?: boolean;
+}) {
   const llm = data.llmAnalysis;
 
   return (
@@ -776,6 +845,7 @@ function AiGeoTab({ data }: { data: CmoData }) {
       <AiCitationsBreakdown
         summary={data.aiCitations ?? null}
         domain={data.workspace.websiteUrl}
+        loading={citationsLoading}
       />
 
       {data.topKeywords.length > 0 ? (
@@ -816,9 +886,11 @@ function AiGeoTab({ data }: { data: CmoData }) {
 function AiCitationsBreakdown({
   summary,
   domain,
+  loading = false,
 }: {
   summary: CmoData["aiCitations"];
   domain: string | null;
+  loading?: boolean;
 }) {
   // Always render every tracked AI platform with its brand favicon —
   // even before a run, an un-cited platform shows 0 (not hidden). This
@@ -890,14 +962,20 @@ function AiCitationsBreakdown({
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-[10px] text-muted-foreground">
+      <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
         {hasData ? (
           <>
             {displayDomain} · updated{" "}
             {new Date(summary!.fetchedAt).toLocaleDateString()}
           </>
+        ) : loading ? (
+          <>
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Checking AI citations for {displayDomain}… this runs once and can
+            take up to a minute.
+          </>
         ) : (
-          <>Run the GEO agent&rsquo;s AI-visibility check to populate counts.</>
+          <>Checking AI citations automatically — refresh in a moment if this stays empty.</>
         )}
       </p>
     </div>
