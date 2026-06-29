@@ -516,7 +516,12 @@ export async function loadCmoSlowData(args: {
   let freshVoice: CmoVoiceProfile | null = null;
   let freshIndustry: string | null = null;
   let freshIcp: string | null = null;
+  // Tracks whether the expensive strategy LLM pipeline ran in THIS render.
+  // When it did, we defer the equally-expensive GEO probe sweep to a later
+  // render so the two don't stack past the serverless `maxDuration` budget.
+  let didHeavyStrategyRegen = false;
   if (!cached && websiteUrl && isVoiceEmpty(voice ?? null)) {
+    didHeavyStrategyRegen = true;
     try {
       const { strategy, snapshot } = await strategyPipeline.generate({
         workspaceId: args.workspaceId,
@@ -637,7 +642,11 @@ export async function loadCmoSlowData(args: {
   let freshSeoScore: number | null = null;
   let freshSeoIssues: SeoIssue[] | null = null;
   let freshGeoScore: number | null = null;
-  if (websiteUrl && pickAvailableModel() != null) {
+  if (websiteUrl) {
+    // The quick SEO audit is rule-based (no LLM), so the auto-run block is
+    // gated only on having a URL — it must populate even when no model key is
+    // configured. The GEO task below additionally requires a model.
+    const hasModel = pickAvailableModel() != null;
     // Dedupe: if an agent ran (or is running) in the last 10 minutes, don't
     // kick a duplicate — this stops a refresh during the first audit from
     // double-billing while the first run is still in flight.
@@ -660,6 +669,11 @@ export async function loadCmoSlowData(args: {
               workspaceId: args.workspaceId,
               agent: "seo",
               startedAt: { gte: tenMinAgo },
+              // Only an in-flight or already-successful run should block a
+              // re-fire. A FAILED run must NOT lock out retries — otherwise a
+              // single transient LLM error leaves the dashboard blank for the
+              // full 10-minute window.
+              status: { in: ["RUNNING", "SUCCESS"] },
             },
           })
           .catch(() => null),
@@ -669,6 +683,7 @@ export async function loadCmoSlowData(args: {
               workspaceId: args.workspaceId,
               agent: "geo",
               startedAt: { gte: tenMinAgo },
+              status: { in: ["RUNNING", "SUCCESS"] },
             },
           })
           .catch(() => null),
@@ -696,7 +711,13 @@ export async function loadCmoSlowData(args: {
           try {
             const { seoAgent } = await import("@/backend/agents/seo");
             const { executeAgent } = await import("@/backend/agents/base");
-            const res = await executeAgent(seoAgent, args.workspaceId, {});
+            // Quick (rule-based, no-LLM) audit: instant and reliable so the
+            // SEO score + Checks tab populate on the very first render of a
+            // new site instead of racing the serverless timeout. The richer
+            // LLM audit runs when the user opens the SEO agent / on schedule.
+            const res = await executeAgent(seoAgent, args.workspaceId, {
+              quick: true,
+            });
             if (res.ok && res.output) {
               const out = res.output as { score?: number; issues?: unknown[] };
               freshSeoScore = typeof out.score === "number" ? out.score : null;
@@ -710,7 +731,11 @@ export async function loadCmoSlowData(args: {
         })()
       );
     }
-    if (!existingGeo && !recentGeoRun) {
+    // GEO runs a sweep of LLM probes (6+ calls) — far too heavy to stack on
+    // top of a fresh strategy regen inside one 60s render. When strategy just
+    // ran, defer GEO to the next render (which hits the warm cache and is
+    // fast), so neither gets cut off mid-flight and left blank.
+    if (hasModel && !existingGeo && !recentGeoRun && !didHeavyStrategyRegen) {
       tasks.push(
         (async () => {
           try {
