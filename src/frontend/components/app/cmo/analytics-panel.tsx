@@ -267,7 +267,11 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Search rankings"
         connected={gsc}
         href="/integrations/gsc"
-        iconSrc="/google-search-console.svg"
+        // Modern 2025 Search Console mark served from Wikimedia Commons.
+        // The bundled /google-search-console.svg in /public is the
+        // automatic fallback if the CDN is ever unreachable.
+        iconSrc="https://upload.wikimedia.org/wikipedia/commons/5/5c/Google_Search_Console_Logo_2025.svg"
+        iconFallbackSrc="/google-search-console.svg"
       />
     </div>
   );
@@ -279,25 +283,34 @@ function ConnectCard({
   connected,
   href,
   iconSrc,
+  iconFallbackSrc,
 }: {
   title: string;
   sub: string;
   connected: boolean;
   href: string;
   iconSrc: string;
+  /** Optional local fallback used if `iconSrc` (remote) fails to load. */
+  iconFallbackSrc?: string;
 }) {
+  const [imgSrc, setImgSrc] = useState(iconSrc);
   return (
     <div className="rounded-xl border bg-muted/20 p-3">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-background">
           <span className="relative h-5 w-5">
             <NextImage
-              src={iconSrc}
+              src={imgSrc}
               alt={`${title} logo`}
               fill
               unoptimized
               sizes="20px"
               className="object-contain"
+              onError={() => {
+                if (iconFallbackSrc && imgSrc !== iconFallbackSrc) {
+                  setImgSrc(iconFallbackSrc);
+                }
+              }}
             />
           </span>
         </div>
