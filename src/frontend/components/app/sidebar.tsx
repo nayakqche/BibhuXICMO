@@ -5,13 +5,10 @@ import { usePathname } from "next/navigation";
 import {
   Bot,
   CreditCard,
-  FileText,
   Home,
-  Layers,
   MessageSquare,
   Plug,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import {
   BacklinkLogo,
@@ -38,9 +35,6 @@ import { WorkspaceSwitcher } from "./workspace-switcher";
 const MAIN = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/agent/cmo", label: "AI CMO", icon: Bot },
-  { href: "/actions", label: "Action Items", icon: Sparkles },
-  { href: "/content", label: "Content Library", icon: FileText },
-  { href: "/queue", label: "Publish Queue", icon: Layers },
   { href: "/chat", label: "Private Chat", icon: MessageSquare },
 ];
 
