@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import NextImage from "next/image";
 import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
   CheckCircle2,
   ExternalLink,
   FileText,
@@ -260,14 +260,14 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Traffic & behavior"
         connected={ga4}
         href="/integrations/ga4"
-        icon={BarChart3}
+        iconSrc="/google-analytics.svg"
       />
       <ConnectCard
         title="Search Console"
         sub="Search rankings"
         connected={gsc}
         href="/integrations/gsc"
-        icon={TrendingUp}
+        iconSrc="/google-search-console.svg"
       />
     </div>
   );
@@ -278,19 +278,28 @@ function ConnectCard({
   sub,
   connected,
   href,
-  icon: Icon,
+  iconSrc,
 }: {
   title: string;
   sub: string;
   connected: boolean;
   href: string;
-  icon: typeof BarChart3;
+  iconSrc: string;
 }) {
   return (
     <div className="rounded-xl border bg-muted/20 p-3">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-background">
-          <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
+          <span className="relative h-5 w-5">
+            <NextImage
+              src={iconSrc}
+              alt={`${title} logo`}
+              fill
+              unoptimized
+              sizes="20px"
+              className="object-contain"
+            />
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-sm font-medium">
