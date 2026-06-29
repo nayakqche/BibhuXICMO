@@ -569,6 +569,13 @@ function SearchTab({ data }: { data: CmoData }) {
           href="/integrations/gsc"
           body="See your top queries, impressions, and click-through rate from Google Search."
         />
+        {!data.ga4.connected ? (
+          <EmptyConnect
+            label="Connect Google Analytics"
+            href="/integrations/ga4"
+            body="Pull real session, user, and conversion counts for the last 30 days."
+          />
+        ) : null}
       </div>
     );
   }
@@ -644,11 +651,6 @@ function TrafficTab({ data }: { data: CmoData }) {
             <p className="mt-2 text-muted-foreground">{llm.illustrativeTraffic.note}</p>
           </div>
         ) : null}
-        <EmptyConnect
-          label="Connect Google Analytics"
-          href="/integrations/ga4"
-          body="Pull real session, user, and conversion counts for the last 30 days."
-        />
       </div>
     );
   }
