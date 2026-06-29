@@ -103,7 +103,6 @@ def health() -> dict:
             "provider": provider["name"],
             "model": provider["model"],
             "anthropic_configured": _real_key("ANTHROPIC_API_KEY"),
-            "openai_configured": _real_key("OPENAI_API_KEY"),
         },
         "reddit": {
             "backend": backend,

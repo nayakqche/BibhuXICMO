@@ -79,7 +79,6 @@ type Health = {
     provider: string;
     model: string;
     anthropic_configured: boolean;
-    openai_configured: boolean;
   };
   reddit: {
     backend: string;
@@ -333,21 +332,29 @@ export function RedditAgentClient({ apiBase }: { apiBase: string | null }) {
           {health ? (
             <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
               <Badge variant="outline" className="gap-1.5 text-[10px]">
-                <Activity className="h-3 w-3 text-emerald-500" />
-                LLM: {health.llm.provider}/{health.llm.model}
+                <Activity
+                  className={`h-3 w-3 ${
+                    health.llm.anthropic_configured
+                      ? "text-emerald-500"
+                      : "text-amber-500"
+                  }`}
+                />
+                AI engine{" "}
+                {health.llm.anthropic_configured ? "connected" : "not configured"}
               </Badge>
-              <Badge variant="outline" className="gap-1.5 text-[10px]">
-                Reddit backend: {health.reddit.backend}
-              </Badge>
-              {!health.reddit.apify_configured ? (
+              {health.reddit.apify_configured ? (
+                <Badge variant="outline" className="gap-1.5 text-[10px]">
+                  <Activity className="h-3 w-3 text-emerald-500" />
+                  Reddit data connected
+                </Badge>
+              ) : (
                 <Badge
                   variant="outline"
                   className="gap-1.5 border-amber-500/30 text-[10px] text-amber-600 dark:text-amber-300"
                 >
-                  <AlertTriangle className="h-3 w-3" /> Reddit data provider not
-                  configured
+                  <AlertTriangle className="h-3 w-3" /> Reddit data not configured
                 </Badge>
-              ) : null}
+              )}
             </div>
           ) : null}
         </CardContent>
