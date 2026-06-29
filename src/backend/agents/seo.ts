@@ -94,6 +94,14 @@ export const seoAgent: Agent<unknown, SEOAuditResult> = {
         }
       );
       result = object;
+      // The model sometimes returns a score with an empty `issues` list —
+      // usually when the page scrape was thin (JS-heavy / bot-blocked site)
+      // so it had little to critique. An empty list leaves the dashboard's
+      // "Checks" tab blank. Backfill with the deterministic rule-based audit
+      // (no LLM, no hallucination) so there's always something concrete to show.
+      if (!Array.isArray(result.issues) || result.issues.length === 0) {
+        result.issues = ruleBasedAudit(snap).issues;
+      }
     } else {
       result = fallbackAudit(snap);
     }

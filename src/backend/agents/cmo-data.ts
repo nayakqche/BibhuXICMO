@@ -645,7 +645,11 @@ export async function loadCmoSlowData(args: {
     const [existingAudit, existingGeo, recentSeoRun, recentGeoRun] =
       await Promise.all([
         prisma.siteAudit
-          .findFirst({ where: { workspaceId: args.workspaceId } })
+          .findFirst({
+            where: { workspaceId: args.workspaceId },
+            orderBy: { ranAt: "desc" },
+            select: { score: true, issues: true },
+          })
           .catch(() => null),
         prisma.geoScoreSnapshot
           .findFirst({ where: { workspaceId: args.workspaceId } })
@@ -670,8 +674,23 @@ export async function loadCmoSlowData(args: {
           .catch(() => null),
       ]);
 
+    // An audit that scored the site but carries no usable issues is
+    // degenerate (e.g. the LLM returned an empty list before the rule-based
+    // backfill landed, or a thin/bot-blocked scrape). Treat a low-scoring,
+    // issue-less audit as "needs a real run" so the Checks tab self-heals.
+    // The 10-minute `recentSeoRun` dedupe below still prevents loop-billing,
+    // and a genuinely clean site (score ≥ 90) is left alone.
+    const auditHasUsableIssues =
+      !!existingAudit &&
+      Array.isArray(existingAudit.issues) &&
+      (existingAudit.issues as unknown[]).some((x) => isIssue(x));
+    const auditIsDegenerate =
+      !!existingAudit &&
+      !auditHasUsableIssues &&
+      (existingAudit.score ?? 0) < 90;
+
     const tasks: Array<Promise<void>> = [];
-    if (!existingAudit && !recentSeoRun) {
+    if ((!existingAudit || auditIsDegenerate) && !recentSeoRun) {
       tasks.push(
         (async () => {
           try {
