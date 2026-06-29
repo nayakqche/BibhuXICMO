@@ -32,7 +32,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/ui/tabs";
 import type { CmoData } from "@/backend/agents/cmo-data";
 import { PlatformIcon } from "@/frontend/components/app/cmo/platform-icon";
-import type { PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
+import { PLATFORMS, type PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
 import type { LighthouseScores } from "@/backend/pagespeed";
 import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 
@@ -773,7 +773,10 @@ function AiGeoTab({ data }: { data: CmoData }) {
       </div>
 
       {/* AI citations breakdown — real Apify AI-visibility data. */}
-      <AiCitationsBreakdown summary={data.aiCitations ?? null} />
+      <AiCitationsBreakdown
+        summary={data.aiCitations ?? null}
+        domain={data.workspace.websiteUrl}
+      />
 
       {data.topKeywords.length > 0 ? (
         <div>
@@ -812,18 +815,35 @@ function AiGeoTab({ data }: { data: CmoData }) {
 
 function AiCitationsBreakdown({
   summary,
+  domain,
 }: {
   summary: CmoData["aiCitations"];
+  domain: string | null;
 }) {
-  if (!summary || summary.platforms.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed p-3 text-center text-[11px] text-muted-foreground">
-        No AI citation data yet. Run the GEO agent&rsquo;s AI-visibility check
-        to see how often each model cites {summary?.domain || "your domain"}.
-      </div>
-    );
-  }
-  const sorted = [...summary.platforms].sort((a, b) => b.citations - a.citations);
+  // Always render every tracked AI platform with its brand favicon —
+  // even before a run, an un-cited platform shows 0 (not hidden). This
+  // keeps the breakdown looking complete and on-brand.
+  const counts = new Map(
+    (summary?.platforms ?? []).map((p) => [p.key, p])
+  );
+  const rows = PLATFORMS.map((meta) => {
+    const hit = counts.get(meta.key);
+    return {
+      key: meta.key,
+      label: meta.label,
+      citations: hit?.citations ?? 0,
+      delta: hit?.delta ?? null,
+    };
+  }).sort((a, b) => b.citations - a.citations);
+
+  const total = summary?.total ?? 0;
+  const hasData = !!summary && summary.platforms.length > 0;
+  const displayDomain =
+    summary?.domain ||
+    (domain
+      ? domain.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")
+      : "your domain");
+
   return (
     <div className="rounded-md border bg-muted/15 p-3">
       <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -833,13 +853,13 @@ function AiCitationsBreakdown({
         </div>
         <span className="text-[11px] text-muted-foreground">
           <span className="font-semibold tabular-nums text-foreground">
-            {formatCompact(summary.total)}
+            {formatCompact(total)}
           </span>{" "}
-          total · {summary.platforms.length} platforms
+          total · {rows.length} platforms
         </span>
       </div>
       <ul className="divide-y rounded-md border bg-background/40">
-        {sorted.map((p) => (
+        {rows.map((p) => (
           <li
             key={p.key}
             className="flex items-center gap-2 px-3 py-2 text-xs"
@@ -847,7 +867,12 @@ function AiCitationsBreakdown({
             <PlatformIcon k={p.key as PlatformKey} className="h-4 w-4" />
             <span className="font-medium text-foreground">{p.label}</span>
             <span className="ml-auto flex items-center gap-1.5 tabular-nums">
-              <span className="font-semibold text-sky-500">
+              <span
+                className={
+                  "font-semibold " +
+                  (p.citations > 0 ? "text-sky-500" : "text-muted-foreground")
+                }
+              >
                 {formatCompact(p.citations)}
               </span>
               {p.delta != null && p.delta !== 0 ? (
@@ -866,8 +891,14 @@ function AiCitationsBreakdown({
         ))}
       </ul>
       <p className="mt-1.5 text-[10px] text-muted-foreground">
-        {summary.domain} · updated{" "}
-        {new Date(summary.fetchedAt).toLocaleDateString()}
+        {hasData ? (
+          <>
+            {displayDomain} · updated{" "}
+            {new Date(summary!.fetchedAt).toLocaleDateString()}
+          </>
+        ) : (
+          <>Run the GEO agent&rsquo;s AI-visibility check to populate counts.</>
+        )}
       </p>
     </div>
   );
@@ -1114,10 +1145,18 @@ function ChecksTab({ data }: { data: CmoData }) {
         </div>
       ) : null}
       {issues.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          Running the first SEO audit… checks populate automatically once it
-          finishes. Hit Refresh if this lingers.
-        </div>
+        data.scores.seo == null ? (
+          <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+            Running the first SEO audit… checks populate automatically once it
+            finishes. Hit Refresh if this lingers.
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+            <CheckCircle2 className="mx-auto mb-1.5 h-4 w-4 text-emerald-500" />
+            No blocking issues flagged in the latest audit. Open the SEO agent
+            to run a deeper crawl.
+          </div>
+        )
       ) : (
         <ul className="divide-y rounded-md border">
           {issues.map((i, idx) => (
