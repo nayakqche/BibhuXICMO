@@ -43,9 +43,80 @@ export async function refreshGoogleToken(
   return json.access_token;
 }
 
+// ------- Active selection (which site / property this workspace uses) -------
+//
+// A Google account often has several Search Console sites and several GA4
+// properties. We pick the right one with this priority:
+//   1. an explicit, persisted choice (Integration.accountId), then
+//   2. an automatic match against the workspace's own website domain, then
+//   3. the first one as a last resort.
+// This keeps the common single-property case zero-config ("super easy") while
+// still letting power users with many properties pin the right one.
+
+/** Bare registrable host for a workspace URL, e.g. "quickads.ai". */
+export function domainRoot(websiteUrl?: string | null): string | null {
+  if (!websiteUrl) return null;
+  try {
+    const u = websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`;
+    return new URL(u).hostname.replace(/^www\./, "").toLowerCase() || null;
+  } catch {
+    const bare = websiteUrl
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0]
+      .toLowerCase();
+    return bare || null;
+  }
+}
+
+function gscSiteMatchesDomain(siteUrl: string, domain: string): boolean {
+  const norm = siteUrl
+    .replace(/^sc-domain:/, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .toLowerCase();
+  return norm === domain || norm.endsWith(`.${domain}`) || domain.endsWith(`.${norm}`);
+}
+
+/** Persist which site / property a workspace uses for a Google provider. */
+export async function setGoogleSelection(
+  workspaceId: string,
+  provider: IntegrationProvider,
+  accountId: string,
+  accountLabel?: string
+): Promise<void> {
+  await prisma.integration
+    .update({
+      where: { workspaceId_provider: { workspaceId, provider } },
+      data: { accountId, accountLabel: accountLabel ?? undefined },
+    })
+    .catch(() => {
+      /* best-effort — never block a render on persisting the selection */
+    });
+}
+
 // ------- Search Console -------
 
 export type GSCSite = { siteUrl: string; permissionLevel: string };
+
+/** Choose the GSC site for this workspace (persisted → domain match → first). */
+export function pickGSCSite(
+  sites: GSCSite[],
+  opts: { preferredId?: string | null; websiteUrl?: string | null }
+): GSCSite | null {
+  if (sites.length === 0) return null;
+  if (opts.preferredId) {
+    const hit = sites.find((s) => s.siteUrl === opts.preferredId);
+    if (hit) return hit;
+  }
+  const domain = domainRoot(opts.websiteUrl);
+  if (domain) {
+    const hit = sites.find((s) => gscSiteMatchesDomain(s.siteUrl, domain));
+    if (hit) return hit;
+  }
+  return sites[0];
+}
 
 export async function listGSCSites(workspaceId: string): Promise<GSCSite[]> {
   const token = await refreshGoogleToken(workspaceId, "GOOGLE_SEARCH_CONSOLE");
@@ -108,6 +179,30 @@ export async function querySearchAnalytics(
 // ------- GA4 -------
 
 export type GA4Property = { name: string; displayName: string };
+
+/** Choose the GA4 property for this workspace (persisted → name/displayName
+ *  match against the website domain → first). GA4 display names are
+ *  user-defined, so the domain match here is best-effort. */
+export function pickGA4Property(
+  props: GA4Property[],
+  opts: { preferredId?: string | null; websiteUrl?: string | null }
+): GA4Property | null {
+  if (props.length === 0) return null;
+  if (opts.preferredId) {
+    const hit = props.find((p) => p.name === opts.preferredId);
+    if (hit) return hit;
+  }
+  const domain = domainRoot(opts.websiteUrl);
+  if (domain) {
+    const root = domain.split(".")[0];
+    const hit = props.find((p) => {
+      const dn = p.displayName.toLowerCase();
+      return dn.includes(domain) || (root.length > 2 && dn.includes(root));
+    });
+    if (hit) return hit;
+  }
+  return props[0];
+}
 
 export async function listGA4Properties(workspaceId: string): Promise<GA4Property[]> {
   const token = await refreshGoogleToken(workspaceId, "GOOGLE_ANALYTICS");

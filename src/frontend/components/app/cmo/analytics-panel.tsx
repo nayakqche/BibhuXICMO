@@ -260,6 +260,7 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Traffic & behavior"
         connected={ga4}
         href="/integrations/ga4"
+        connectHref="/api/integrations/ga4/start"
         iconSrc="/google-analytics.svg"
       />
       <ConnectCard
@@ -267,6 +268,7 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Search rankings"
         connected={gsc}
         href="/integrations/gsc"
+        connectHref="/api/integrations/gsc/start"
         // Icon-only Search Console mark (no wordmark). Wikimedia's
         // "Google_Search_Console_Logo_2025.svg" file is the wordmark
         // + icon combo, which made the tile show "Google Search
@@ -282,6 +284,7 @@ function ConnectCard({
   sub,
   connected,
   href,
+  connectHref,
   iconSrc,
   iconFallbackSrc,
 }: {
@@ -289,6 +292,9 @@ function ConnectCard({
   sub: string;
   connected: boolean;
   href: string;
+  /** OAuth start route. When set, "Connect" goes straight to Google (one
+   *  click) via a full-page navigation; "Manage" still goes to `href`. */
+  connectHref?: string;
   iconSrc: string;
   /** Optional local fallback used if `iconSrc` (remote) fails to load. */
   iconFallbackSrc?: string;
@@ -330,7 +336,13 @@ function ConnectCard({
         className="mt-3 w-full"
         asChild
       >
-        <Link href={href}>{connected ? "Manage" : "Connect"}</Link>
+        {connected || !connectHref ? (
+          <Link href={href}>{connected ? "Manage" : "Connect"}</Link>
+        ) : (
+          // Plain anchor: starting OAuth is a full-page redirect to Google,
+          // not a client-side route change.
+          <a href={connectHref}>Connect</a>
+        )}
       </Button>
     </div>
   );
@@ -566,13 +578,13 @@ function SearchTab({ data }: { data: CmoData }) {
         ) : null}
         <EmptyConnect
           label="Connect Google Search Console"
-          href="/integrations/gsc"
+          href="/api/integrations/gsc/start"
           body="See your top queries, impressions, and click-through rate from Google Search."
         />
         {!data.ga4.connected ? (
           <EmptyConnect
             label="Connect Google Analytics"
-            href="/integrations/ga4"
+            href="/api/integrations/ga4/start"
             body="Pull real session, user, and conversion counts for the last 30 days."
           />
         ) : null}
@@ -717,14 +729,17 @@ function EmptyConnect({
   body,
 }: {
   label: string;
+  /** OAuth start route (e.g. /api/integrations/gsc/start) or a page route. */
   href: string;
   body: string;
 }) {
+  // Start routes redirect off-site to Google, so use a full-page nav.
+  const isStart = href.startsWith("/api/");
   return (
     <div className="rounded-md border border-dashed p-4 text-center">
       <p className="text-xs text-muted-foreground">{body}</p>
       <Button size="sm" className="mt-3" asChild>
-        <Link href={href}>{label}</Link>
+        {isStart ? <a href={href}>{label}</a> : <Link href={href}>{label}</Link>}
       </Button>
     </div>
   );
