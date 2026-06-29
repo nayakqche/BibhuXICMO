@@ -69,95 +69,151 @@ function buildPrompt(ctx: AgentContext, snap: PageSnapshot): string {
   ].join("\n");
 }
 
-export const seoAgent: Agent<unknown, SEOAuditResult> = {
+/** Input for the SEO agent. `quick` runs the deterministic rule-based audit
+ *  only (no LLM) — used by the dashboard auto-populate so a brand-new site
+ *  gets an instant score + concrete issues without waiting on (or risking a
+ *  timeout from) a chain of LLM calls. */
+export type SEOAgentInput = { quick?: boolean } | undefined;
+
+export const seoAgent: Agent<SEOAgentInput, SEOAuditResult> = {
   id: "seo",
   title: "SEO Agent",
   schedule: "0 6 * * *", // daily 06:00 UTC
   minCredits: 1,
-  async run(ctx: AgentContext): Promise<SEOAuditResult> {
+  async run(ctx: AgentContext, input: SEOAgentInput): Promise<SEOAuditResult> {
     if (!ctx.websiteUrl) throw new Error("Workspace has no website URL");
 
-    const snap = await fetchPage(ctx.websiteUrl);
+    // fetchPage can throw on a network error / timeout (not on HTTP 4xx/5xx,
+    // which still return a snapshot). Never let that abort the audit — fall
+    // back to a minimal stub so the rule-based audit still produces a result.
+    const snap = await fetchPage(ctx.websiteUrl).catch(
+      (): PageSnapshot => stubSnapshot(ctx.websiteUrl as string)
+    );
+
+    // Quick mode: deterministic, instant, zero-LLM. Keeps the auto-populate
+    // path off the LLM critical path so the dashboard never blocks or times out.
+    if (input?.quick) {
+      const result = fallbackAudit(snap);
+      await persistAudit(ctx, result);
+      return result;
+    }
 
     const model = pickAvailableModel(ctx.preferredModel ?? "gpt-4o-mini");
     let result: SEOAuditResult;
 
     if (model) {
-      const { object } = await meteredGenerateObject(
-        buildPrompt(ctx, snap),
-        auditSchema,
-        {
-          workspaceId: ctx.workspaceId,
-          reason: "seo.audit",
-          model,
-          system: SYSTEM,
+      try {
+        const { object } = await meteredGenerateObject(
+          buildPrompt(ctx, snap),
+          auditSchema,
+          {
+            workspaceId: ctx.workspaceId,
+            reason: "seo.audit",
+            model,
+            system: SYSTEM,
+          }
+        );
+        result = object;
+        // The model sometimes returns a score with an empty `issues` list —
+        // usually when the page scrape was thin (JS-heavy / bot-blocked site)
+        // so it had little to critique. An empty list leaves the dashboard's
+        // "Checks" tab blank. Backfill with the deterministic rule-based audit
+        // (no LLM, no hallucination) so there's always something concrete to show.
+        if (!Array.isArray(result.issues) || result.issues.length === 0) {
+          result.issues = ruleBasedAudit(snap).issues;
         }
-      );
-      result = object;
-      // The model sometimes returns a score with an empty `issues` list —
-      // usually when the page scrape was thin (JS-heavy / bot-blocked site)
-      // so it had little to critique. An empty list leaves the dashboard's
-      // "Checks" tab blank. Backfill with the deterministic rule-based audit
-      // (no LLM, no hallucination) so there's always something concrete to show.
-      if (!Array.isArray(result.issues) || result.issues.length === 0) {
-        result.issues = ruleBasedAudit(snap).issues;
+      } catch (err) {
+        // The LLM call can fail (credit balance, rate limit, provider
+        // outage, schema-repair give-up). Never let that hard-fail the
+        // whole audit — that leaves a FAILED run and a permanently blank
+        // dashboard. Fall back to the deterministic rule-based audit so a
+        // SiteAudit is ALWAYS written with a real score + concrete issues.
+        console.warn("[seo] LLM audit failed, using rule-based fallback:", err);
+        result = fallbackAudit(snap);
       }
     } else {
       result = fallbackAudit(snap);
     }
 
-    await prisma.siteAudit.create({
-      data: {
-        workspaceId: ctx.workspaceId,
-        score: result.score,
-        issues: JSON.parse(JSON.stringify(result.issues)),
-        pages: 1,
-      },
-    });
-
-    // Persist top keyword opportunities
-    for (const opp of result.opportunities.slice(0, 10)) {
-      await prisma.keyword
-        .upsert({
-          where: {
-            workspaceId_query_country: {
-              workspaceId: ctx.workspaceId,
-              query: opp.keyword.toLowerCase(),
-              country: "us",
-            },
-          },
-          create: {
-            workspaceId: ctx.workspaceId,
-            query: opp.keyword.toLowerCase(),
-            intent: opp.intent,
-          },
-          update: { intent: opp.intent },
-        })
-        .catch(() => null);
-    }
-
-    // Emit action items
-    const topIssues = result.issues
-      .filter((i) => i.severity === "high")
-      .slice(0, 3);
-    for (const issue of topIssues) {
-      await prisma.actionItem.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          agent: "seo",
-          type: "seo.fix",
-          title: issue.title,
-          summary: issue.fix,
-          cta: "Fix it",
-          href: "/agents/seo",
-          priority: "HIGH",
-        },
-      });
-    }
-
+    await persistAudit(ctx, result);
     return result;
   },
 };
+
+/** Write the audit row, keyword opportunities, and high-severity action
+ *  items. Shared by the full LLM path and the quick rule-based path. */
+async function persistAudit(
+  ctx: AgentContext,
+  result: SEOAuditResult
+): Promise<void> {
+  await prisma.siteAudit.create({
+    data: {
+      workspaceId: ctx.workspaceId,
+      score: result.score,
+      issues: JSON.parse(JSON.stringify(result.issues)),
+      pages: 1,
+    },
+  });
+
+  // Persist top keyword opportunities
+  for (const opp of result.opportunities.slice(0, 10)) {
+    await prisma.keyword
+      .upsert({
+        where: {
+          workspaceId_query_country: {
+            workspaceId: ctx.workspaceId,
+            query: opp.keyword.toLowerCase(),
+            country: "us",
+          },
+        },
+        create: {
+          workspaceId: ctx.workspaceId,
+          query: opp.keyword.toLowerCase(),
+          intent: opp.intent,
+        },
+        update: { intent: opp.intent },
+      })
+      .catch(() => null);
+  }
+
+  // Emit action items
+  const topIssues = result.issues
+    .filter((i) => i.severity === "high")
+    .slice(0, 3);
+  for (const issue of topIssues) {
+    await prisma.actionItem.create({
+      data: {
+        workspaceId: ctx.workspaceId,
+        agent: "seo",
+        type: "seo.fix",
+        title: issue.title,
+        summary: issue.fix,
+        cta: "Fix it",
+        href: "/agents/seo",
+        priority: "HIGH",
+      },
+    });
+  }
+}
+
+/** Minimal snapshot used when the live fetch fails, so the rule-based audit
+ *  can still run (and flag the unreachable page) instead of throwing. */
+function stubSnapshot(url: string): PageSnapshot {
+  return {
+    url,
+    title: "",
+    description: "",
+    h1: [],
+    h2: [],
+    text: "",
+    wordCount: 0,
+    images: [],
+    links: [],
+    jsonLd: [],
+    status: 0,
+    meta: {},
+  };
+}
 
 function fallbackAudit(snap: PageSnapshot): SEOAuditResult {
   const rule = ruleBasedAudit(snap);
