@@ -41,13 +41,18 @@ In the project, open **APIs & Services → Library** and enable both:
 ### Step 4. Create OAuth credentials
 1. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 2. Application type: **Web application**.
-3. Under **Authorized redirect URIs**, add **both** of these, using your real
-   app URL (whatever `APP_URL` is — e.g. `https://xicmo.onrender.com`):
+3. Under **Authorized redirect URIs**, add **all three** of these, using your
+   real app URL (whatever `APP_URL` is — e.g. `https://xicmo.onrender.com`):
 
    ```
    https://YOUR_APP_URL/api/integrations/google-search-console/callback
    https://YOUR_APP_URL/api/integrations/google-analytics/callback
+   https://YOUR_APP_URL/api/auth/callback/google
    ```
+
+   The third one powers **"Sign in with Google"** — one OAuth client covers
+   both the data integrations *and* social login, so you don't need separate
+   clients.
 
    > These must match exactly (scheme, host, path, no trailing slash). If you
    > also test locally, add the `http://localhost:3000/...` versions too.
@@ -56,16 +61,29 @@ In the project, open **APIs & Services → Library** and enable both:
 ### Step 5. Add the two environment variables
 On Render (the app's web service) → **Environment** → add:
 
-| Key                 | Value                              |
-| ------------------- | ---------------------------------- |
-| `GSC_CLIENT_ID`     | the OAuth **Client ID** from above |
-| `GSC_CLIENT_SECRET` | the OAuth **Client secret**        |
+| Key                    | Value                                             |
+| ---------------------- | ------------------------------------------------- |
+| `GSC_CLIENT_ID`        | the OAuth **Client ID**                           |
+| `GSC_CLIENT_SECRET`    | the OAuth **Client secret**                       |
+| `GOOGLE_CLIENT_ID`     | the **same** Client ID (enables Google login)     |
+| `GOOGLE_CLIENT_SECRET` | the **same** Client secret                        |
+| `PAGESPEED_API_KEY`    | an **API key** (Credentials → Create → API key)   |
 
-> Both Google Analytics and Search Console share this **one** pair of
-> credentials — you do **not** need separate keys for each.
+> Both Google Analytics and Search Console share the `GSC_*` pair, and the
+> `GOOGLE_*` pair (for "Sign in with Google") can reuse the **same** OAuth
+> client — you don't need separate clients. `PAGESPEED_API_KEY` is a separate
+> **API key** (not the OAuth client) and raises the Lighthouse/PageSpeed quota.
 
 Also make sure `APP_URL` (or `NEXT_PUBLIC_APP_URL`) is set to your public app
-URL — it's what builds the redirect URIs above.
+URL — it's what builds every redirect URI above — and that `AUTH_SECRET` is set
+to a long random string.
+
+### "Sign in with Google" (already built)
+Once `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set and the service is
+redeployed, a **Continue with Google** button appears automatically on the
+`/login` and `/register` pages (NextAuth Google provider). It links to an
+existing account if the Google email matches one already registered. No code
+changes needed — it's gated purely on those env vars.
 
 **Redeploy** the service so the new env vars load.
 
