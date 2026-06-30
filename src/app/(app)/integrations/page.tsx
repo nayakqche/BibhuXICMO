@@ -188,7 +188,7 @@ function envKeyForProvider(p: IntegrationProvider): string {
       return "LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET";
     case "GOOGLE_SEARCH_CONSOLE":
     case "GOOGLE_ANALYTICS":
-      return "GSC_CLIENT_ID / GSC_CLIENT_SECRET";
+      return "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET";
     case "GITHUB":
       return "GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET";
     case "INSTAGRAM":

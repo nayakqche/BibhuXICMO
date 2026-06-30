@@ -76,7 +76,15 @@ const envSchema = z.object({
   FACEBOOK_CLIENT_ID: z.string().optional(),
   FACEBOOK_CLIENT_SECRET: z.string().optional(),
 
+  /** Google OAuth client used for BOTH Search Console and Analytics 4
+   *  read-only data connections. One client, one pair of env vars. The
+   *  older GSC_* names below are accepted as a fallback so existing
+   *  deployments keep working without re-pasting the secret. */
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+  /** @deprecated Use GOOGLE_OAUTH_CLIENT_ID — still read as a fallback. */
   GSC_CLIENT_ID: z.string().optional(),
+  /** @deprecated Use GOOGLE_OAUTH_CLIENT_SECRET — still read as a fallback. */
   GSC_CLIENT_SECRET: z.string().optional(),
   PAGESPEED_API_KEY: z.string().optional(),
 
