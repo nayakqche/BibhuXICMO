@@ -8,6 +8,7 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   ExternalLink,
   FileText,
   Globe,
@@ -437,15 +438,28 @@ function HealthTab({ data }: { data: CmoData }) {
           ) : null}
 
           {data.pageSpeed.detail && data.pageSpeed.detail.metrics.length > 0 ? (
-            <CoreWebVitals metrics={data.pageSpeed.detail.metrics} />
+            <CoreWebVitals label="Mobile" metrics={data.pageSpeed.detail.metrics} />
           ) : null}
 
-          {data.pageSpeed.detail &&
-          data.pageSpeed.detail.opportunities.length > 0 ? (
-            <PageSpeedOpportunities
-              opportunities={data.pageSpeed.detail.opportunities}
+          {data.pageSpeed.desktopDetail &&
+          data.pageSpeed.desktopDetail.metrics.length > 0 ? (
+            <CoreWebVitals
+              label="Desktop"
+              metrics={data.pageSpeed.desktopDetail.metrics}
             />
           ) : null}
+
+          {(() => {
+            // Opportunities overlap heavily across devices; show the mobile
+            // set (stricter, more issues) and fall back to desktop.
+            const opps =
+              (data.pageSpeed.detail?.opportunities.length
+                ? data.pageSpeed.detail.opportunities
+                : data.pageSpeed.desktopDetail?.opportunities) ?? [];
+            return opps.length > 0 ? (
+              <PageSpeedOpportunities opportunities={opps} />
+            ) : null;
+          })()}
         </div>
       ) : null}
 
@@ -563,32 +577,57 @@ function lhScoreDot(score: number | null): string {
   return "bg-red-500";
 }
 
-function CoreWebVitals({ metrics }: { metrics: CoreWebVital[] }) {
+function CoreWebVitals({
+  label,
+  metrics,
+}: {
+  label: string;
+  metrics: CoreWebVital[];
+}) {
   return (
     <div className="mt-4">
       <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-        Core Web Vitals (mobile)
+        Core Web Vitals ({label})
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {metrics.map((m) => (
-          <div key={m.id} className="rounded-md border bg-card/50 p-2">
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${lhScoreDot(m.score)}`}
-                aria-hidden
-              />
-              <span className="truncate text-[10px] text-muted-foreground" title={m.label}>
-                {m.label}
-              </span>
+        {metrics.map((m) => {
+          const help = PAGESPEED_HELP[m.id];
+          return (
+            <div key={m.id} className="rounded-md border bg-card/50 p-2">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${lhScoreDot(m.score)}`}
+                  aria-hidden
+                />
+                <span
+                  className="truncate text-[10px] text-muted-foreground"
+                  title={help?.what ?? m.label}
+                >
+                  {m.label}
+                </span>
+              </div>
+              <div className={`mt-0.5 text-base font-semibold tabular-nums ${lhScoreText(m.score)}`}>
+                {m.value}
+              </div>
             </div>
-            <div className={`mt-0.5 text-base font-semibold tabular-nums ${lhScoreText(m.score)}`}>
-              {m.value}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function oppSaving(o: PageSpeedOpportunity): string | null {
+  const parts: string[] = [];
+  if (o.savingsMs)
+    parts.push(
+      o.savingsMs >= 1000
+        ? `${(o.savingsMs / 1000).toFixed(1)} s`
+        : `${o.savingsMs} ms`
+    );
+  if (o.savingsBytes) parts.push(formatBytes(o.savingsBytes));
+  if (parts.length) return `Est. saving ${parts.join(" · ")}`;
+  return o.displayValue;
 }
 
 function PageSpeedOpportunities({
@@ -596,37 +635,187 @@ function PageSpeedOpportunities({
 }: {
   opportunities: PageSpeedOpportunity[];
 }) {
-  const saving = (o: PageSpeedOpportunity): string | null => {
-    const parts: string[] = [];
-    if (o.savingsMs) parts.push(`${o.savingsMs >= 1000 ? (o.savingsMs / 1000).toFixed(1) + " s" : o.savingsMs + " ms"}`);
-    if (o.savingsBytes) parts.push(formatBytes(o.savingsBytes));
-    if (parts.length) return `Est. saving ${parts.join(" · ")}`;
-    return o.displayValue;
-  };
   return (
     <div className="mt-4">
-      <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
         Opportunities &amp; diagnostics
       </div>
-      <ul className="divide-y rounded-md border">
-        {opportunities.map((o) => (
-          <li key={o.id} className="flex items-start gap-2 px-3 py-2 text-xs">
-            <span
-              className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${lhScoreDot(o.score)}`}
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1">
-              <span className="font-medium text-foreground">{o.title}</span>
-              {saving(o) ? (
-                <p className="mt-0.5 leading-snug text-muted-foreground">{saving(o)}</p>
-              ) : null}
-            </div>
-          </li>
-        ))}
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        The fixes with the biggest impact on speed, rankings, and bounce —
+        tap one to see what it means and how to fix it.
+      </p>
+      <ul className="space-y-1.5">
+        {opportunities.map((o) => {
+          const help = PAGESPEED_HELP[o.id];
+          const saving = oppSaving(o);
+          return (
+            <li key={o.id} className="rounded-md border bg-card/40">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-2 text-xs [&::-webkit-details-marker]:hidden">
+                  <span
+                    className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${lhScoreDot(o.score)}`}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium text-foreground">{o.title}</span>
+                    {saving ? (
+                      <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                        {saving}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                {help ? (
+                  <div className="space-y-1.5 px-3 pb-2.5 pl-7 text-[11px] leading-relaxed text-muted-foreground">
+                    <p>
+                      <span className="font-semibold text-foreground">
+                        What it means:{" "}
+                      </span>
+                      {help.what}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-foreground">
+                        How to fix:{" "}
+                      </span>
+                      {help.fix}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="px-3 pb-2.5 pl-7 text-[11px] leading-relaxed text-muted-foreground">
+                    Lighthouse flagged this as an opportunity to improve load
+                    performance.
+                  </div>
+                )}
+              </details>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
 }
+
+/**
+ * Plain-English, marketer/CMO-framed explanations for the PageSpeed audits we
+ * surface. `what` = the business impact (bounce, rankings, conversions);
+ * `fix` = the concrete action to hand a developer. Kept short (3–4 lines).
+ */
+const PAGESPEED_HELP: Record<string, { what: string; fix: string }> = {
+  // --- Core Web Vitals -------------------------------------------------
+  "first-contentful-paint": {
+    what: "How fast visitors see the first thing on the page. A slow start feels broken and pushes people to bounce before your message loads.",
+    fix: "Speed up hosting/TTFB, cut render-blocking CSS/JS, and inline critical above-the-fold styles.",
+  },
+  "largest-contentful-paint": {
+    what: "When your main content (hero image or headline) becomes visible. It's a Google ranking signal — aim under 2.5s. Slow LCP loses impatient visitors.",
+    fix: "Optimize and preload the hero image, serve modern formats (WebP/AVIF), and remove anything blocking the main content from rendering.",
+  },
+  "total-blocking-time": {
+    what: "How long the page is frozen and unclickable while scripts run. High TBT means visitors tap and nothing happens — a conversion killer.",
+    fix: "Ship less JavaScript, code-split, and defer non-critical and third-party scripts.",
+  },
+  "cumulative-layout-shift": {
+    what: "How much the page jumps around as it loads. Shifts cause mis-clicks and look cheap/broken; it's also a ranking signal — aim under 0.1.",
+    fix: "Set explicit width/height on images and ads, and reserve space for late-loading elements and fonts.",
+  },
+  "speed-index": {
+    what: "How quickly the page visually fills in. A high number feels sluggish even if the page eventually loads.",
+    fix: "Reduce page weight, optimize images, and prioritize above-the-fold content.",
+  },
+  interactive: {
+    what: "When the page becomes fully usable. High Time-to-Interactive means people try to click menus/buttons and they don't respond yet.",
+    fix: "Cut and defer JavaScript so the browser's main thread frees up sooner.",
+  },
+  // --- Opportunities / diagnostics ------------------------------------
+  "render-blocking-resources": {
+    what: "Some CSS/JS files block the page from showing until they finish downloading, so visitors stare at a blank screen longer.",
+    fix: "Defer/async non-critical scripts and inline the critical above-the-fold CSS.",
+  },
+  "unused-javascript": {
+    what: "Pages ship JavaScript that never runs on them — wasted download time and mobile data that slows everyone down.",
+    fix: "Code-split and lazy-load scripts so each page loads only what it needs; remove unused libraries and tag-manager tags.",
+  },
+  "unused-css-rules": {
+    what: "Stylesheet rules are downloaded but never used on the page, delaying the first paint.",
+    fix: "Purge unused CSS (e.g. PurgeCSS/Tailwind's purge) and split styles per template.",
+  },
+  "legacy-javascript": {
+    what: "You're shipping old-browser polyfills modern browsers don't need, bloating the bundle for the 95%+ on modern browsers.",
+    fix: "Target modern browsers in your build (update the browserslist) to drop legacy transforms.",
+  },
+  "unminified-javascript": {
+    what: "Scripts aren't minified, so files are bigger than necessary and load slower.",
+    fix: "Enable minification in your production build/host (most frameworks do this automatically).",
+  },
+  "unminified-css": {
+    what: "Stylesheets aren't minified, adding unnecessary bytes to every page load.",
+    fix: "Turn on CSS minification in your build pipeline.",
+  },
+  "modern-image-formats": {
+    what: "Images use heavy old formats (JPEG/PNG). They can be a fraction of the size in modern formats, which speeds up load a lot.",
+    fix: "Serve WebP/AVIF — most image CDNs convert automatically.",
+  },
+  "uses-optimized-images": {
+    what: "Images aren't compressed, adding unnecessary megabytes that hit mobile users hardest.",
+    fix: "Compress before upload or use an image CDN that optimizes on the fly.",
+  },
+  "uses-responsive-images": {
+    what: "You're sending desktop-sized images to phones, wasting bandwidth and slowing mobile load.",
+    fix: "Use responsive srcset/sizes so each device downloads an appropriately sized image.",
+  },
+  "offscreen-images": {
+    what: "Below-the-fold images load immediately even though many visitors never scroll to them.",
+    fix: 'Lazy-load offscreen images (loading="lazy").',
+  },
+  "efficient-animated-content": {
+    what: "Animated GIFs are enormous compared to video and noticeably slow the page.",
+    fix: "Replace GIFs with MP4/WebM video.",
+  },
+  "duplicated-javascript": {
+    what: "The same JavaScript is bundled more than once, downloading and parsing it twice.",
+    fix: "Dedupe shared dependencies in your bundler.",
+  },
+  "uses-text-compression": {
+    what: "Text assets (HTML/CSS/JS) aren't compressed in transit, so they download larger than they should.",
+    fix: "Enable Brotli or Gzip compression on your server/CDN.",
+  },
+  "uses-long-cache-ttl": {
+    what: "Static files aren't cached long enough, so repeat visitors re-download them every visit.",
+    fix: "Set a long Cache-Control max-age on static assets (use hashed filenames so updates still bust the cache).",
+  },
+  "total-byte-weight": {
+    what: "The page is heavy overall, which punishes mobile users and slow connections — exactly where you lose conversions.",
+    fix: "Trim images, scripts, and fonts; load non-critical assets later.",
+  },
+  "dom-size": {
+    what: "The page's HTML is very large/complex, which slows rendering and makes interactions laggy.",
+    fix: "Simplify markup, paginate long lists, and avoid deeply nested components.",
+  },
+  "mainthread-work-breakdown": {
+    what: "The browser spends too long parsing and running JavaScript, delaying when the page becomes usable.",
+    fix: "Reduce and split JavaScript; move heavy work off the main thread.",
+  },
+  "bootup-time": {
+    what: "JavaScript takes too long to start up, holding back interactivity.",
+    fix: "Ship less JS and defer non-critical scripts.",
+  },
+  "server-response-time": {
+    what: "Your server is slow to send the first byte (TTFB) — every visitor waits before anything can even start loading.",
+    fix: "Add caching/a CDN, use faster hosting, or optimize slow backend/database queries.",
+  },
+  redirects: {
+    what: "Visitors hit extra redirects before reaching the page, adding delay to every landing — especially from ads.",
+    fix: "Link directly to the final URL and remove redirect chains.",
+  },
+  "third-party-summary": {
+    what: "Third-party scripts (analytics, chat widgets, ads, embeds) are slowing the page — often the single biggest drag.",
+    fix: "Audit them; lazy-load or remove non-essential tags and defer the rest.",
+  },
+};
 
 function SearchTab({ data }: { data: CmoData }) {
   const llm = data.llmAnalysis;
