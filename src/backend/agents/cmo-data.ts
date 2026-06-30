@@ -25,6 +25,8 @@ import {
   listGA4Properties,
   querySearchAnalytics,
   runGA4Report,
+  pickGSCSite,
+  pickGA4Property,
 } from "@/integrations/google";
 import {
   generateCmoLlmAnalysis,
@@ -471,8 +473,8 @@ export async function loadCmoSlowData(args: {
       withPageSpeed && websiteUrl
         ? fetchPageSpeed(websiteUrl).catch(() => null)
         : Promise.resolve(null),
-      gscConnected ? loadGsc(args.workspaceId) : Promise.resolve(null),
-      ga4Connected ? loadGa4(args.workspaceId) : Promise.resolve(null),
+      gscConnected ? loadGsc(args.workspaceId, websiteUrl) : Promise.resolve(null),
+      ga4Connected ? loadGa4(args.workspaceId, websiteUrl) : Promise.resolve(null),
     ]);
 
     // AWAIT the write — previously fire-and-forget, which could race with
@@ -914,12 +916,32 @@ export async function loadCmoData(args: {
 }
 
 async function loadGsc(
-  workspaceId: string
+  workspaceId: string,
+  websiteUrl: string | null
 ): Promise<CmoSlowData["gsc"]> {
   try {
-    const sites = await listGSCSites(workspaceId);
+    const [sites, integration] = await Promise.all([
+      listGSCSites(workspaceId),
+      prisma.integration
+        .findUnique({
+          where: {
+            workspaceId_provider: {
+              workspaceId,
+              provider: "GOOGLE_SEARCH_CONSOLE",
+            },
+          },
+          select: { accountId: true },
+        })
+        .catch(() => null),
+    ]);
     if (sites.length === 0) return { connected: true, rows: [], site: null };
-    const site = sites[0];
+    // Pick the site that matches this workspace's domain (or the user's
+    // pinned choice) instead of blindly using the first one.
+    const site = pickGSCSite(sites, {
+      preferredId: integration?.accountId,
+      websiteUrl,
+    });
+    if (!site) return { connected: true, rows: [], site: null };
     const rows = await querySearchAnalytics(workspaceId, site.siteUrl, {
       dimensions: ["query"],
       rowLimit: 25,
@@ -941,13 +963,31 @@ async function loadGsc(
 }
 
 async function loadGa4(
-  workspaceId: string
+  workspaceId: string,
+  websiteUrl: string | null
 ): Promise<CmoSlowData["ga4"]> {
   try {
-    const props = await listGA4Properties(workspaceId);
+    const [props, integration] = await Promise.all([
+      listGA4Properties(workspaceId),
+      prisma.integration
+        .findUnique({
+          where: {
+            workspaceId_provider: {
+              workspaceId,
+              provider: "GOOGLE_ANALYTICS",
+            },
+          },
+          select: { accountId: true },
+        })
+        .catch(() => null),
+    ]);
     if (props.length === 0)
       return { connected: true, rows: [], property: null };
-    const prop = props[0];
+    const prop = pickGA4Property(props, {
+      preferredId: integration?.accountId,
+      websiteUrl,
+    });
+    if (!prop) return { connected: true, rows: [], property: null };
     const rows = await runGA4Report(workspaceId, prop.name, {
       dimensions: ["pagePath"],
       metrics: ["sessions", "activeUsers", "conversions"],

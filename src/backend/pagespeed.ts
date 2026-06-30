@@ -7,14 +7,78 @@ export type LighthouseScores = {
   seo: number | null;
 };
 
+/** A Core Web Vital / lab metric (FCP, LCP, TBT, CLS, Speed Index, TTI). */
+export type CoreWebVital = {
+  id: string;
+  label: string;
+  /** Human display value, e.g. "0.5 s" or "0.02". */
+  value: string;
+  /** Lighthouse 0–1 score (null when not scored). Drives the colour. */
+  score: number | null;
+};
+
+/** A Lighthouse opportunity / diagnostic with an estimated saving. */
+export type PageSpeedOpportunity = {
+  id: string;
+  title: string;
+  displayValue: string | null;
+  savingsMs: number | null;
+  savingsBytes: number | null;
+  score: number | null;
+};
+
+/** Rich audit data extracted from the Lighthouse report (mobile run). */
+export type PageSpeedDetail = {
+  metrics: CoreWebVital[];
+  opportunities: PageSpeedOpportunity[];
+};
+
 export type PageSpeedResult = {
   ok: boolean;
   url: string;
   mobile: LighthouseScores;
   desktop: LighthouseScores;
+  /** Core Web Vitals + opportunities from the mobile run (desktop fallback). */
+  detail?: PageSpeedDetail;
   fetchedAt: string;
   error?: string;
 };
+
+// Order matches Google's PageSpeed "Metrics" panel.
+const METRIC_DEFS: Array<{ id: string; label: string }> = [
+  { id: "first-contentful-paint", label: "First Contentful Paint" },
+  { id: "largest-contentful-paint", label: "Largest Contentful Paint" },
+  { id: "total-blocking-time", label: "Total Blocking Time" },
+  { id: "cumulative-layout-shift", label: "Cumulative Layout Shift" },
+  { id: "speed-index", label: "Speed Index" },
+  { id: "interactive", label: "Time to Interactive" },
+];
+
+// Opportunities + diagnostics worth surfacing. We only show the ones with
+// room to improve (score < 1), ranked by estimated saving.
+const OPPORTUNITY_IDS = [
+  "render-blocking-resources",
+  "unused-javascript",
+  "unused-css-rules",
+  "legacy-javascript",
+  "unminified-javascript",
+  "unminified-css",
+  "modern-image-formats",
+  "uses-optimized-images",
+  "uses-responsive-images",
+  "offscreen-images",
+  "efficient-animated-content",
+  "duplicated-javascript",
+  "uses-text-compression",
+  "uses-long-cache-ttl",
+  "total-byte-weight",
+  "dom-size",
+  "mainthread-work-breakdown",
+  "bootup-time",
+  "server-response-time",
+  "redirects",
+  "third-party-summary",
+];
 
 const ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 // Lighthouse can take 30-50s on a heavy site; mobile emulation is the slow one.
@@ -22,13 +86,78 @@ const ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const TIMEOUT_MS = 60_000;
 const CATEGORIES = ["performance", "accessibility", "best-practices", "seo"] as const;
 
-type ApiResponse = {
-  lighthouseResult?: {
-    categories?: Record<string, { score?: number | null }>;
+type ApiAudit = {
+  id?: string;
+  title?: string;
+  score?: number | null;
+  displayValue?: string;
+  numericValue?: number;
+  details?: {
+    type?: string;
+    overallSavingsMs?: number;
+    overallSavingsBytes?: number;
   };
 };
 
-type RunResult = { scores: LighthouseScores; error?: string };
+type ApiResponse = {
+  lighthouseResult?: {
+    categories?: Record<string, { score?: number | null }>;
+    audits?: Record<string, ApiAudit>;
+  };
+};
+
+type RunResult = {
+  scores: LighthouseScores;
+  detail?: PageSpeedDetail;
+  error?: string;
+};
+
+function extractDetail(
+  audits: Record<string, ApiAudit> | undefined
+): PageSpeedDetail {
+  const a = audits ?? {};
+  const metrics: CoreWebVital[] = METRIC_DEFS.flatMap((def) => {
+    const audit = a[def.id];
+    if (!audit || audit.displayValue == null) return [];
+    return [
+      {
+        id: def.id,
+        label: def.label,
+        value: audit.displayValue,
+        score: audit.score ?? null,
+      },
+    ];
+  });
+
+  const opportunities: PageSpeedOpportunity[] = OPPORTUNITY_IDS.flatMap((id) => {
+    const audit = a[id];
+    if (!audit) return [];
+    // Only surface audits with room to improve (skip perfect / passing ones).
+    if (audit.score == null || audit.score >= 1) return [];
+    const savingsMs = audit.details?.overallSavingsMs ?? null;
+    const savingsBytes = audit.details?.overallSavingsBytes ?? null;
+    return [
+      {
+        id,
+        title: audit.title ?? id,
+        displayValue: audit.displayValue ?? null,
+        savingsMs: savingsMs && savingsMs > 0 ? Math.round(savingsMs) : null,
+        savingsBytes:
+          savingsBytes && savingsBytes > 0 ? Math.round(savingsBytes) : null,
+        score: audit.score ?? null,
+      },
+    ];
+  })
+    .sort(
+      (x, y) =>
+        (y.savingsMs ?? 0) - (x.savingsMs ?? 0) ||
+        (y.savingsBytes ?? 0) - (x.savingsBytes ?? 0) ||
+        (x.score ?? 1) - (y.score ?? 1)
+    )
+    .slice(0, 8);
+
+  return { metrics, opportunities };
+}
 
 async function runOne(
   url: string,
@@ -70,6 +199,7 @@ async function runOne(
         bestPractices: pct(cats["best-practices"]?.score),
         seo: pct(cats.seo?.score),
       },
+      detail: extractDetail(json.lighthouseResult?.audits),
     };
   } catch (err) {
     const e = err as Error;
@@ -126,11 +256,18 @@ export async function fetchPageSpeed(url: string): Promise<PageSpeedResult> {
     const errorReason = !ok
       ? mobile.error || desktop.error || "Google PageSpeed returned no scores."
       : undefined;
+    // Surface the mobile audit detail (Google's default view); fall back to
+    // desktop if the mobile run didn't return audits.
+    const detail =
+      (mobile.detail && mobile.detail.metrics.length > 0
+        ? mobile.detail
+        : desktop.detail) ?? undefined;
     return {
       ok,
       url,
       mobile: mobile.scores,
       desktop: desktop.scores,
+      detail,
       fetchedAt: new Date().toISOString(),
       error: errorReason,
     };

@@ -2,7 +2,12 @@ import Link from "next/link";
 import { BarChart3 } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
-import { listGA4Properties, runGA4Report } from "@/integrations/google";
+import {
+  listGA4Properties,
+  runGA4Report,
+  pickGA4Property,
+  setGoogleSelection,
+} from "@/integrations/google";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Button } from "@/frontend/components/ui/button";
 
@@ -43,7 +48,23 @@ export default async function Ga4Page(props: {
   }
 
   const properties = await listGA4Properties(workspace.id);
-  const activeProp = selectedProp ?? properties[0]?.name;
+  // Remember an explicit pick so the AI CMO dashboard reads the same property.
+  if (
+    selectedProp &&
+    selectedProp !== integration.accountId &&
+    properties.some((p) => p.name === selectedProp)
+  ) {
+    await setGoogleSelection(
+      workspace.id,
+      "GOOGLE_ANALYTICS",
+      selectedProp,
+      properties.find((p) => p.name === selectedProp)?.displayName
+    );
+  }
+  const activeProp = pickGA4Property(properties, {
+    preferredId: selectedProp ?? integration.accountId,
+    websiteUrl: workspace.websiteUrl,
+  })?.name;
   const rows = activeProp
     ? await runGA4Report(workspace.id, activeProp, {
         dimensions: ["pagePath"],

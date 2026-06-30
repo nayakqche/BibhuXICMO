@@ -33,7 +33,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/
 import type { CmoData } from "@/backend/agents/cmo-data";
 import { PlatformIcon } from "@/frontend/components/app/cmo/platform-icon";
 import { PLATFORMS, type PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
-import type { LighthouseScores } from "@/backend/pagespeed";
+import type {
+  LighthouseScores,
+  CoreWebVital,
+  PageSpeedOpportunity,
+} from "@/backend/pagespeed";
 import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 import {
   startAiCitationsRunAction,
@@ -260,6 +264,7 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Traffic & behavior"
         connected={ga4}
         href="/integrations/ga4"
+        connectHref="/api/integrations/ga4/start"
         iconSrc="/google-analytics.svg"
       />
       <ConnectCard
@@ -267,6 +272,7 @@ function ConnectGoogleRow({ ga4, gsc }: { ga4: boolean; gsc: boolean }) {
         sub="Search rankings"
         connected={gsc}
         href="/integrations/gsc"
+        connectHref="/api/integrations/gsc/start"
         // Icon-only Search Console mark (no wordmark). Wikimedia's
         // "Google_Search_Console_Logo_2025.svg" file is the wordmark
         // + icon combo, which made the tile show "Google Search
@@ -282,6 +288,7 @@ function ConnectCard({
   sub,
   connected,
   href,
+  connectHref,
   iconSrc,
   iconFallbackSrc,
 }: {
@@ -289,6 +296,9 @@ function ConnectCard({
   sub: string;
   connected: boolean;
   href: string;
+  /** OAuth start route. When set, "Connect" goes straight to Google (one
+   *  click) via a full-page navigation; "Manage" still goes to `href`. */
+  connectHref?: string;
   iconSrc: string;
   /** Optional local fallback used if `iconSrc` (remote) fails to load. */
   iconFallbackSrc?: string;
@@ -330,7 +340,13 @@ function ConnectCard({
         className="mt-3 w-full"
         asChild
       >
-        <Link href={href}>{connected ? "Manage" : "Connect"}</Link>
+        {connected || !connectHref ? (
+          <Link href={href}>{connected ? "Manage" : "Connect"}</Link>
+        ) : (
+          // Plain anchor: starting OAuth is a full-page redirect to Google,
+          // not a client-side route change.
+          <a href={connectHref}>Connect</a>
+        )}
       </Button>
     </div>
   );
@@ -418,6 +434,17 @@ function HealthTab({ data }: { data: CmoData }) {
                   </>
                 )}
             </p>
+          ) : null}
+
+          {data.pageSpeed.detail && data.pageSpeed.detail.metrics.length > 0 ? (
+            <CoreWebVitals metrics={data.pageSpeed.detail.metrics} />
+          ) : null}
+
+          {data.pageSpeed.detail &&
+          data.pageSpeed.detail.opportunities.length > 0 ? (
+            <PageSpeedOpportunities
+              opportunities={data.pageSpeed.detail.opportunities}
+            />
           ) : null}
         </div>
       ) : null}
@@ -521,6 +548,86 @@ function ScoreCircle({ label, value }: { label: string; value: number | null }) 
   );
 }
 
+/** Lighthouse score (0–1) → tailwind text colour. >=0.9 good, >=0.5 avg. */
+function lhScoreText(score: number | null): string {
+  if (score == null) return "text-muted-foreground";
+  if (score >= 0.9) return "text-emerald-600 dark:text-emerald-400";
+  if (score >= 0.5) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function lhScoreDot(score: number | null): string {
+  if (score == null) return "bg-muted-foreground/40";
+  if (score >= 0.9) return "bg-emerald-500";
+  if (score >= 0.5) return "bg-amber-500";
+  return "bg-red-500";
+}
+
+function CoreWebVitals({ metrics }: { metrics: CoreWebVital[] }) {
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Core Web Vitals (mobile)
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {metrics.map((m) => (
+          <div key={m.id} className="rounded-md border bg-card/50 p-2">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${lhScoreDot(m.score)}`}
+                aria-hidden
+              />
+              <span className="truncate text-[10px] text-muted-foreground" title={m.label}>
+                {m.label}
+              </span>
+            </div>
+            <div className={`mt-0.5 text-base font-semibold tabular-nums ${lhScoreText(m.score)}`}>
+              {m.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PageSpeedOpportunities({
+  opportunities,
+}: {
+  opportunities: PageSpeedOpportunity[];
+}) {
+  const saving = (o: PageSpeedOpportunity): string | null => {
+    const parts: string[] = [];
+    if (o.savingsMs) parts.push(`${o.savingsMs >= 1000 ? (o.savingsMs / 1000).toFixed(1) + " s" : o.savingsMs + " ms"}`);
+    if (o.savingsBytes) parts.push(formatBytes(o.savingsBytes));
+    if (parts.length) return `Est. saving ${parts.join(" · ")}`;
+    return o.displayValue;
+  };
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Opportunities &amp; diagnostics
+      </div>
+      <ul className="divide-y rounded-md border">
+        {opportunities.map((o) => (
+          <li key={o.id} className="flex items-start gap-2 px-3 py-2 text-xs">
+            <span
+              className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${lhScoreDot(o.score)}`}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <span className="font-medium text-foreground">{o.title}</span>
+              {saving(o) ? (
+                <p className="mt-0.5 leading-snug text-muted-foreground">{saving(o)}</p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function SearchTab({ data }: { data: CmoData }) {
   const llm = data.llmAnalysis;
 
@@ -566,13 +673,13 @@ function SearchTab({ data }: { data: CmoData }) {
         ) : null}
         <EmptyConnect
           label="Connect Google Search Console"
-          href="/integrations/gsc"
+          href="/api/integrations/gsc/start"
           body="See your top queries, impressions, and click-through rate from Google Search."
         />
         {!data.ga4.connected ? (
           <EmptyConnect
             label="Connect Google Analytics"
-            href="/integrations/ga4"
+            href="/api/integrations/ga4/start"
             body="Pull real session, user, and conversion counts for the last 30 days."
           />
         ) : null}
@@ -717,14 +824,17 @@ function EmptyConnect({
   body,
 }: {
   label: string;
+  /** OAuth start route (e.g. /api/integrations/gsc/start) or a page route. */
   href: string;
   body: string;
 }) {
+  // Start routes redirect off-site to Google, so use a full-page nav.
+  const isStart = href.startsWith("/api/");
   return (
     <div className="rounded-md border border-dashed p-4 text-center">
       <p className="text-xs text-muted-foreground">{body}</p>
       <Button size="sm" className="mt-3" asChild>
-        <Link href={href}>{label}</Link>
+        {isStart ? <a href={href}>{label}</a> : <Link href={href}>{label}</Link>}
       </Button>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   getProviderConfig,
   redirectUriFor,
 } from "@/integrations/providers";
+import { env } from "@/shared/env";
 import type { IntegrationProvider } from "@prisma/client";
 
 const SLUG_MAP: Record<string, IntegrationProvider> = {
@@ -34,9 +35,12 @@ export async function GET(
 
   const cfg = getProviderConfig(provider);
   if (!cfg) {
-    return NextResponse.json(
-      { error: `${provider} is not configured. Set the required client_id/client_secret env vars.` },
-      { status: 503 }
+    // Land the user back on the Integrations hub with a readable message
+    // instead of a raw 503 JSON blob when the OAuth app isn't set up yet.
+    return NextResponse.redirect(
+      `${env.APP_URL}/integrations?error=${encodeURIComponent(
+        `${slug}_not_configured`
+      )}`
     );
   }
 

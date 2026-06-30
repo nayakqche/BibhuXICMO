@@ -2,7 +2,12 @@ import Link from "next/link";
 import { TrendingUp } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
-import { listGSCSites, querySearchAnalytics } from "@/integrations/google";
+import {
+  listGSCSites,
+  querySearchAnalytics,
+  pickGSCSite,
+  setGoogleSelection,
+} from "@/integrations/google";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Button } from "@/frontend/components/ui/button";
 import { Badge } from "@/frontend/components/ui/badge";
@@ -44,7 +49,24 @@ export default async function GscPage(props: {
   }
 
   const sites = await listGSCSites(workspace.id);
-  const activeSite = selectedSite ?? sites[0]?.siteUrl;
+  // When the user explicitly clicks a site chip, remember it so the AI CMO
+  // dashboard reads from the same property.
+  if (
+    selectedSite &&
+    selectedSite !== integration.accountId &&
+    sites.some((s) => s.siteUrl === selectedSite)
+  ) {
+    await setGoogleSelection(
+      workspace.id,
+      "GOOGLE_SEARCH_CONSOLE",
+      selectedSite,
+      selectedSite
+    );
+  }
+  const activeSite = pickGSCSite(sites, {
+    preferredId: selectedSite ?? integration.accountId,
+    websiteUrl: workspace.websiteUrl,
+  })?.siteUrl;
   const queries = activeSite
     ? await querySearchAnalytics(workspace.id, activeSite, {
         dimensions: ["query"],
