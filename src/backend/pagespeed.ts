@@ -38,8 +38,10 @@ export type PageSpeedResult = {
   url: string;
   mobile: LighthouseScores;
   desktop: LighthouseScores;
-  /** Core Web Vitals + opportunities from the mobile run (desktop fallback). */
+  /** Core Web Vitals + opportunities from the mobile run. */
   detail?: PageSpeedDetail;
+  /** Core Web Vitals + opportunities from the desktop run. */
+  desktopDetail?: PageSpeedDetail;
   fetchedAt: string;
   error?: string;
 };
@@ -256,18 +258,13 @@ export async function fetchPageSpeed(url: string): Promise<PageSpeedResult> {
     const errorReason = !ok
       ? mobile.error || desktop.error || "Google PageSpeed returned no scores."
       : undefined;
-    // Surface the mobile audit detail (Google's default view); fall back to
-    // desktop if the mobile run didn't return audits.
-    const detail =
-      (mobile.detail && mobile.detail.metrics.length > 0
-        ? mobile.detail
-        : desktop.detail) ?? undefined;
     return {
       ok,
       url,
       mobile: mobile.scores,
       desktop: desktop.scores,
-      detail,
+      detail: mobile.detail,
+      desktopDetail: desktop.detail,
       fetchedAt: new Date().toISOString(),
       error: errorReason,
     };
