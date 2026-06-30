@@ -33,7 +33,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/frontend/components/
 import type { CmoData } from "@/backend/agents/cmo-data";
 import { PlatformIcon } from "@/frontend/components/app/cmo/platform-icon";
 import { PLATFORMS, type PlatformKey } from "@/app/(app)/agents/geo/ai-citations-types";
-import type { LighthouseScores } from "@/backend/pagespeed";
+import type {
+  LighthouseScores,
+  CoreWebVital,
+  PageSpeedOpportunity,
+} from "@/backend/pagespeed";
 import { refreshCmoSlowDataAction } from "@/app/(app)/agent/cmo/actions";
 import {
   startAiCitationsRunAction,
@@ -431,6 +435,17 @@ function HealthTab({ data }: { data: CmoData }) {
                 )}
             </p>
           ) : null}
+
+          {data.pageSpeed.detail && data.pageSpeed.detail.metrics.length > 0 ? (
+            <CoreWebVitals metrics={data.pageSpeed.detail.metrics} />
+          ) : null}
+
+          {data.pageSpeed.detail &&
+          data.pageSpeed.detail.opportunities.length > 0 ? (
+            <PageSpeedOpportunities
+              opportunities={data.pageSpeed.detail.opportunities}
+            />
+          ) : null}
         </div>
       ) : null}
 
@@ -529,6 +544,86 @@ function ScoreCircle({ label, value }: { label: string; value: number | null }) 
         {value ?? "—"}
       </div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+/** Lighthouse score (0–1) → tailwind text colour. >=0.9 good, >=0.5 avg. */
+function lhScoreText(score: number | null): string {
+  if (score == null) return "text-muted-foreground";
+  if (score >= 0.9) return "text-emerald-600 dark:text-emerald-400";
+  if (score >= 0.5) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
+}
+
+function lhScoreDot(score: number | null): string {
+  if (score == null) return "bg-muted-foreground/40";
+  if (score >= 0.9) return "bg-emerald-500";
+  if (score >= 0.5) return "bg-amber-500";
+  return "bg-red-500";
+}
+
+function CoreWebVitals({ metrics }: { metrics: CoreWebVital[] }) {
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Core Web Vitals (mobile)
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {metrics.map((m) => (
+          <div key={m.id} className="rounded-md border bg-card/50 p-2">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${lhScoreDot(m.score)}`}
+                aria-hidden
+              />
+              <span className="truncate text-[10px] text-muted-foreground" title={m.label}>
+                {m.label}
+              </span>
+            </div>
+            <div className={`mt-0.5 text-base font-semibold tabular-nums ${lhScoreText(m.score)}`}>
+              {m.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PageSpeedOpportunities({
+  opportunities,
+}: {
+  opportunities: PageSpeedOpportunity[];
+}) {
+  const saving = (o: PageSpeedOpportunity): string | null => {
+    const parts: string[] = [];
+    if (o.savingsMs) parts.push(`${o.savingsMs >= 1000 ? (o.savingsMs / 1000).toFixed(1) + " s" : o.savingsMs + " ms"}`);
+    if (o.savingsBytes) parts.push(formatBytes(o.savingsBytes));
+    if (parts.length) return `Est. saving ${parts.join(" · ")}`;
+    return o.displayValue;
+  };
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Opportunities &amp; diagnostics
+      </div>
+      <ul className="divide-y rounded-md border">
+        {opportunities.map((o) => (
+          <li key={o.id} className="flex items-start gap-2 px-3 py-2 text-xs">
+            <span
+              className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${lhScoreDot(o.score)}`}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <span className="font-medium text-foreground">{o.title}</span>
+              {saving(o) ? (
+                <p className="mt-0.5 leading-snug text-muted-foreground">{saving(o)}</p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
