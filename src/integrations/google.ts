@@ -14,15 +14,19 @@ export async function refreshGoogleToken(
     return integration.accessToken;
   }
   if (!integration.refreshToken) return integration.accessToken;
-  if (!env.GSC_CLIENT_ID || !env.GSC_CLIENT_SECRET) {
+  // Read the OAuth client from the canonical name, falling back to the
+  // legacy GSC_* pair so older deployments keep refreshing tokens.
+  const clientId = env.GOOGLE_OAUTH_CLIENT_ID || env.GSC_CLIENT_ID;
+  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET || env.GSC_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
     return integration.accessToken;
   }
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: integration.refreshToken,
-    client_id: env.GSC_CLIENT_ID,
-    client_secret: env.GSC_CLIENT_SECRET,
+    client_id: clientId,
+    client_secret: clientSecret,
   });
 
   const res = await fetch("https://oauth2.googleapis.com/token", {

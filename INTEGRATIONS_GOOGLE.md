@@ -41,13 +41,18 @@ In the project, open **APIs & Services → Library** and enable both:
 ### Step 4. Create OAuth credentials
 1. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 2. Application type: **Web application**.
-3. Under **Authorized redirect URIs**, add **both** of these, using your real
-   app URL (whatever `APP_URL` is — e.g. `https://xicmo.onrender.com`):
+3. Under **Authorized redirect URIs**, add **all three** of these, using your
+   real app URL (whatever `APP_URL` is — e.g. `https://xicmo.onrender.com`):
 
    ```
    https://YOUR_APP_URL/api/integrations/google-search-console/callback
    https://YOUR_APP_URL/api/integrations/google-analytics/callback
+   https://YOUR_APP_URL/api/auth/callback/google
    ```
+
+   The third one powers **"Sign in with Google"** — one OAuth client covers
+   both the data integrations *and* social login, so you don't need separate
+   clients.
 
    > These must match exactly (scheme, host, path, no trailing slash). If you
    > also test locally, add the `http://localhost:3000/...` versions too.
@@ -56,16 +61,35 @@ In the project, open **APIs & Services → Library** and enable both:
 ### Step 5. Add the two environment variables
 On Render (the app's web service) → **Environment** → add:
 
-| Key                 | Value                              |
-| ------------------- | ---------------------------------- |
-| `GSC_CLIENT_ID`     | the OAuth **Client ID** from above |
-| `GSC_CLIENT_SECRET` | the OAuth **Client secret**        |
+| Key                          | Powers                                  | Value                                          |
+| ---------------------------- | --------------------------------------- | ---------------------------------------------- |
+| `GOOGLE_OAUTH_CLIENT_ID`     | **GA4 + Search Console** (data connect) | the OAuth **Client ID**                        |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | **GA4 + Search Console**                | the OAuth **Client secret**                    |
+| `GOOGLE_CLIENT_ID`           | **"Sign in with Google"** (NextAuth)    | the **same** Client ID                         |
+| `GOOGLE_CLIENT_SECRET`       | **"Sign in with Google"**               | the **same** Client secret                     |
+| `PAGESPEED_API_KEY`          | Lighthouse / PageSpeed quota            | an **API key** (Credentials → Create → API key)|
 
-> Both Google Analytics and Search Console share this **one** pair of
-> credentials — you do **not** need separate keys for each.
+> **One OAuth client covers everything** — set the same Client ID / secret in
+> both the `GOOGLE_OAUTH_*` and `GOOGLE_*` pairs. The first pair powers the
+> read-only data connections (Search Console + Analytics share it — that's
+> intentional, not a typo); the second pair powers Google sign-in.
+>
+> `PAGESPEED_API_KEY` is a separate **API key** (not OAuth) — it just lifts
+> the rate limit so Lighthouse doesn't fall back to estimates.
+>
+> ⚙️ Legacy: if you already set `GSC_CLIENT_ID` / `GSC_CLIENT_SECRET`, those
+> still work as a fallback — you don't have to re-add them.
 
 Also make sure `APP_URL` (or `NEXT_PUBLIC_APP_URL`) is set to your public app
-URL — it's what builds the redirect URIs above.
+URL — it's what builds every redirect URI above — and that `AUTH_SECRET` is set
+to a long random string.
+
+### "Sign in with Google" (already built)
+Once `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set and the service is
+redeployed, a **Continue with Google** button appears automatically on the
+`/login` and `/register` pages (NextAuth Google provider). It links to an
+existing account if the Google email matches one already registered. No code
+changes needed — it's gated purely on those env vars.
 
 **Redeploy** the service so the new env vars load.
 
@@ -94,7 +118,7 @@ remembered and used across the dashboard.
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Card says **"Set GSC_CLIENT_ID / GSC_CLIENT_SECRET to enable"** | Part 1 not done, or the service wasn't redeployed after adding env vars. |
+| Card says **"Set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET to enable"** | Part 1 not done, or the service wasn't redeployed after adding env vars. |
 | `redirect_uri_mismatch` on Google's screen | The redirect URI in Step 4 doesn't exactly match `APP_URL`. Re-check scheme/host/path. |
 | `access_blocked` / "app not verified" | Add your Google account as a **Test user** (Step 3.5), or publish the consent screen to Production. |
 | Connected, but **no data** | New GA4 properties / GSC sites can take ~24–48h to report data, or the signed-in Google account doesn't have access to that property. |

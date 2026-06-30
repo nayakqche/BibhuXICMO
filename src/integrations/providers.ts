@@ -2,6 +2,16 @@ import type { IntegrationProvider } from "@prisma/client";
 import { env } from "@/shared/env";
 import type { OAuthProviderConfig } from "./oauth";
 
+/** Single source of truth for the Google data OAuth client. Prefers the
+ *  clearer GOOGLE_OAUTH_* names and falls back to the legacy GSC_* pair so
+ *  existing deployments don't break. */
+function googleDataClient(): { id?: string; secret?: string } {
+  return {
+    id: env.GOOGLE_OAUTH_CLIENT_ID || env.GSC_CLIENT_ID,
+    secret: env.GOOGLE_OAUTH_CLIENT_SECRET || env.GSC_CLIENT_SECRET,
+  };
+}
+
 export function getProviderConfig(
   provider: IntegrationProvider
 ): OAuthProviderConfig | null {
@@ -40,30 +50,34 @@ export function getProviderConfig(
         scope: "openid profile email w_member_social",
         tokenAuth: "body",
       };
-    case "GOOGLE_SEARCH_CONSOLE":
-      if (!env.GSC_CLIENT_ID || !env.GSC_CLIENT_SECRET) return null;
+    case "GOOGLE_SEARCH_CONSOLE": {
+      const g = googleDataClient();
+      if (!g.id || !g.secret) return null;
       return {
         provider,
-        clientId: env.GSC_CLIENT_ID,
-        clientSecret: env.GSC_CLIENT_SECRET,
+        clientId: g.id,
+        clientSecret: g.secret,
         authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenUrl: "https://oauth2.googleapis.com/token",
         scope: "https://www.googleapis.com/auth/webmasters.readonly",
         extraAuthParams: { access_type: "offline", prompt: "consent" },
         tokenAuth: "body",
       };
-    case "GOOGLE_ANALYTICS":
-      if (!env.GSC_CLIENT_ID || !env.GSC_CLIENT_SECRET) return null;
+    }
+    case "GOOGLE_ANALYTICS": {
+      const g = googleDataClient();
+      if (!g.id || !g.secret) return null;
       return {
         provider,
-        clientId: env.GSC_CLIENT_ID,
-        clientSecret: env.GSC_CLIENT_SECRET,
+        clientId: g.id,
+        clientSecret: g.secret,
         authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenUrl: "https://oauth2.googleapis.com/token",
         scope: "https://www.googleapis.com/auth/analytics.readonly",
         extraAuthParams: { access_type: "offline", prompt: "consent" },
         tokenAuth: "body",
       };
+    }
     case "GITHUB":
       if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) return null;
       return {
