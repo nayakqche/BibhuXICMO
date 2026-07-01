@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { TrendingUp } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
@@ -8,6 +9,8 @@ import {
   pickGSCSite,
   setGoogleSelection,
 } from "@/integrations/google";
+import { CMO_SLOW_TAG } from "@/backend/agents/cmo-data";
+import { clearCmoSlowCache } from "@/backend/cmo-slow-cache";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Button } from "@/frontend/components/ui/button";
 import { Badge } from "@/frontend/components/ui/badge";
@@ -62,6 +65,12 @@ export default async function GscPage(props: {
       selectedSite,
       selectedSite
     );
+    // Bust the AI CMO slow-data cache so the dashboard's Search tab
+    // reflects the new property on the next render, instead of serving
+    // yesterday's cached rows for the previously-selected site.
+    await clearCmoSlowCache(workspace.id);
+    revalidateTag(CMO_SLOW_TAG);
+    revalidatePath("/agent/cmo");
   }
   const activeSite = pickGSCSite(sites, {
     preferredId: selectedSite ?? integration.accountId,
@@ -87,8 +96,13 @@ export default async function GscPage(props: {
       </div>
 
       {sites.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {sites.map((s) => (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Pick which property the AI CMO dashboard should use for its Search
+            tab — the highlighted one drives the dashboard.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {sites.map((s) => (
             <Link
               key={s.siteUrl}
               href={`/integrations/gsc?site=${encodeURIComponent(s.siteUrl)}`}
@@ -100,8 +114,9 @@ export default async function GscPage(props: {
             >
               {s.siteUrl.replace(/^(sc-domain:|https?:\/\/)/, "")}
             </Link>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
       <Card>
