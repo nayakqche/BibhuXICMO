@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { BarChart3 } from "lucide-react";
 import { requireWorkspace } from "@/backend/workspace";
 import { prisma } from "@/backend/db";
@@ -8,6 +9,8 @@ import {
   pickGA4Property,
   setGoogleSelection,
 } from "@/integrations/google";
+import { CMO_SLOW_TAG } from "@/backend/agents/cmo-data";
+import { clearCmoSlowCache } from "@/backend/cmo-slow-cache";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/frontend/components/ui/card";
 import { Button } from "@/frontend/components/ui/button";
 
@@ -60,6 +63,11 @@ export default async function Ga4Page(props: {
       selectedProp,
       properties.find((p) => p.name === selectedProp)?.displayName
     );
+    // Bust the AI CMO slow-data cache so the dashboard's Traffic tab
+    // reflects the new property on the next render.
+    await clearCmoSlowCache(workspace.id);
+    revalidateTag(CMO_SLOW_TAG);
+    revalidatePath("/agent/cmo");
   }
   const activeProp = pickGA4Property(properties, {
     preferredId: selectedProp ?? integration.accountId,
@@ -87,21 +95,27 @@ export default async function Ga4Page(props: {
       </div>
 
       {properties.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {properties.map((p) => (
-            <Link
-              key={p.name}
-              href={`/integrations/ga4?property=${encodeURIComponent(p.name)}`}
+        <>
+          <p className="text-xs text-muted-foreground">
+            Pick which property the AI CMO dashboard should use for its Traffic
+            tab — the highlighted one drives the dashboard.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {properties.map((p) => (
+              <Link
+                key={p.name}
+                href={`/integrations/ga4?property=${encodeURIComponent(p.name)}`}
               className={`rounded-md border px-3 py-1 text-xs ${
                 p.name === activeProp
                   ? "border-primary bg-primary/10 text-primary"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {p.displayName}
-            </Link>
-          ))}
-        </div>
+                {p.displayName}
+              </Link>
+            ))}
+          </div>
+        </>
       )}
 
       <Card>

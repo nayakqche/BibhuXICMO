@@ -877,9 +877,26 @@ function SearchTab({ data }: { data: CmoData }) {
   }
   if (data.gsc.rows.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        No queries returned yet. New properties can take ~24 hours before GSC reports data.
-      </p>
+      <div className="space-y-2 text-xs text-muted-foreground">
+        <p>
+          No queries returned yet for{" "}
+          <span className="font-mono text-foreground">
+            {data.gsc.site
+              ? data.gsc.site.replace(/^(sc-domain:|https?:\/\/)/, "")
+              : "the selected property"}
+          </span>
+          . Either the property is new (Search Console can take ~24 hours to
+          report data) or the connected Google account has multiple properties.
+        </p>
+        <p>
+          If you have another property with data, open the{" "}
+          <Link href="/integrations/gsc" className="text-primary underline">
+            Search Console page
+          </Link>{" "}
+          and click the property you want to use — the AI CMO dashboard will
+          switch to it.
+        </p>
+      </div>
     );
   }
   return (
